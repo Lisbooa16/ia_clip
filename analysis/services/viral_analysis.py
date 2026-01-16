@@ -87,12 +87,15 @@ class ViralAnalysisResult:
     metadata: dict[str, Any]
     score: int
     score_label: str
+    confidence_score: float
+    confidence_label: str
     narrative_archetype: str
     viral_category: str
     audience_motivation: list[str]
     emotional_triggers: list[str]
     story_insights: dict[str, str]
     similar_videos: list[dict[str, Any]]
+    evidence_videos: list[dict[str, Any]]
     editorial_decisions: list[dict[str, Any]]
     discarded_reason: str | None
 
@@ -102,12 +105,15 @@ class ViralAnalysisResult:
             "metadata": self.metadata,
             "score": self.score,
             "score_label": self.score_label,
+            "confidence_score": self.confidence_score,
+            "confidence_label": self.confidence_label,
             "narrative_archetype": self.narrative_archetype,
             "viral_category": self.viral_category,
             "audience_motivation": self.audience_motivation,
             "emotional_triggers": self.emotional_triggers,
             "story_insights": self.story_insights,
             "similar_videos": self.similar_videos,
+            "evidence_videos": self.evidence_videos,
             "editorial_decisions": self.editorial_decisions,
             "discarded_reason": self.discarded_reason,
         }
@@ -368,6 +374,25 @@ def _rank_decisions(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return ranked
 
 
+def _compute_confidence(
+    keywords: list[str],
+    emotional_triggers: list[str],
+    similar_videos: list[dict[str, Any]],
+    score: int,
+) -> float:
+    keyword_signal = min(len(keywords), 5) / 5
+    emotion_signal = min(len(emotional_triggers), 3) / 3
+    similarity_signal = min(len(similar_videos), 3) / 3
+    score_signal = min(score, 100) / 100
+    return round(
+        (0.35 * score_signal)
+        + (0.25 * similarity_signal)
+        + (0.2 * keyword_signal)
+        + (0.2 * emotion_signal),
+        2,
+    )
+
+
 def build_analysis(url: str) -> ViralAnalysisResult:
     platform = detect_platform(url)
     metadata = {}
@@ -434,13 +459,29 @@ def build_analysis(url: str) -> ViralAnalysisResult:
             }
         )
 
+    confidence_score = _compute_confidence(
+        keywords=keywords,
+        emotional_triggers=emotional_triggers,
+        similar_videos=similar_videos,
+        score=score,
+    )
+    confidence_label = "alta" if confidence_score >= 0.7 else "moderada"
+
     editorial_candidates = _build_candidate_decisions(
         keywords, entities, narrative_archetype, moral_angle, emotional_triggers
     )
     ranked_decisions = _rank_decisions(editorial_candidates)
 
     discarded_reason = None
-    if len(ranked_decisions) < 2:
+    if confidence_score < 0.6 and ranked_decisions:
+        ranked_decisions = ranked_decisions[:1]
+        ranked_decisions[0]["recommendation_note"] = (
+            "Única ideia recomendada (confiança moderada)."
+        )
+        discarded_reason = (
+            "A confiança está abaixo do ideal; optamos por uma única direção clara."
+        )
+    elif len(ranked_decisions) < 2:
         discarded_reason = (
             "As informações disponíveis não sustentam múltiplos caminhos fortes; "
             "priorizamos a decisão mais segura."
@@ -457,6 +498,8 @@ def build_analysis(url: str) -> ViralAnalysisResult:
             subject, action, story_insights
         )
 
+    evidence_videos = similar_videos[:3]
+
     return ViralAnalysisResult(
         platform=platform,
         metadata={
@@ -471,12 +514,15 @@ def build_analysis(url: str) -> ViralAnalysisResult:
         },
         score=score,
         score_label=score_label,
+        confidence_score=confidence_score,
+        confidence_label=confidence_label,
         narrative_archetype=narrative_archetype,
         viral_category=viral_category,
         audience_motivation=motivations,
         emotional_triggers=emotional_triggers or ["curiosidade"],
         story_insights=story_insights,
         similar_videos=similar_videos,
+        evidence_videos=evidence_videos,
         editorial_decisions=ranked_decisions,
         discarded_reason=discarded_reason,
     )

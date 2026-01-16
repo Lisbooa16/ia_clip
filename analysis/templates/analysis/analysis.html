@@ -115,7 +115,10 @@
             </section>
 
             <section class="card decision">
-                <h2>O que postar a seguir</h2>
+                <div class="decision-title">
+                    <h2>O que postar a seguir</h2>
+                    <span class="decision-confidence">Confiança {{ result.confidence_label }}</span>
+                </div>
                 {% if result.editorial_decisions %}
                     <div class="decision-grid">
                         {% for decision in result.editorial_decisions %}
@@ -140,6 +143,9 @@
                                     </ul>
                                 </div>
                                 <p class="decision-why">{{ decision.rationale }}</p>
+                                {% if decision.recommendation_note %}
+                                    <p class="decision-note">{{ decision.recommendation_note }}</p>
+                                {% endif %}
                                 {% if decision.priority == 1 %}
                                     <div class="next-step">
                                         <h4>Se performar bem</h4>
@@ -154,6 +160,9 @@
                                         </ul>
                                     </div>
                                 {% endif %}
+                                {% with blueprint_text="Abertura: "|add:decision.blueprint.opening|add:"\nSetup: "|add:decision.blueprint.setup|add:"\nContexto: "|add:decision.blueprint.context|add:"\nTensão: "|add:decision.blueprint.tension|add:"\nRevelação: "|add:decision.blueprint.reveal|add:"\nFinal: "|add:decision.ending %}
+                                    <button class="copy-blueprint" data-blueprint="{{ blueprint_text|escapejs }}">Copiar blueprint</button>
+                                {% endwith %}
                             </article>
                         {% endfor %}
                     </div>
@@ -165,33 +174,43 @@
                 {% endif %}
             </section>
 
-            <section class="grid">
-                <div class="card">
-                    <h2>Vídeos semelhantes reais</h2>
-                    {% if result.similar_videos %}
-                        <div class="similar-grid">
-                            {% for video in result.similar_videos %}
-                                <article class="similar-card">
-                                    {% if video.thumbnail %}
-                                        <img src="{{ video.thumbnail }}" alt="Thumbnail de {{ video.title }}">
-                                    {% endif %}
-                                    <div>
-                                        <p class="similar-title"><a href="{{ video.url }}" target="_blank">{{ video.title }}</a></p>
-                                        <p class="similar-meta">{{ video.platform|title }} • {{ video.views|default:"--" }} views</p>
-                                        <p class="similar-why">{{ video.why_similar }}</p>
-                                        {% if video.narrative_take %}
-                                            <p class="similar-take">{{ video.narrative_take }}</p>
-                                        {% endif %}
-                                    </div>
-                                </article>
-                            {% endfor %}
-                        </div>
-                    {% else %}
-                        <p class="muted">Sem vídeos semelhantes suficientes para comparação.</p>
-                    {% endif %}
-                </div>
-            </section>
+            {% if result.evidence_videos %}
+                <section class="card evidence">
+                    <h2>Evidências</h2>
+                    <div class="evidence-grid">
+                        {% for video in result.evidence_videos %}
+                            <article class="evidence-card">
+                                <div class="evidence-text">
+                                    <p class="evidence-title"><a href="{{ video.url }}" target="_blank">{{ video.title }}</a></p>
+                                    <p class="evidence-meta">{{ video.platform|title }} • {{ video.views|default:"--" }} views</p>
+                                    <p class="evidence-why">O que funcionou: {{ video.narrative_take }}</p>
+                                </div>
+                            </article>
+                        {% endfor %}
+                    </div>
+                </section>
+            {% endif %}
         {% endif %}
     </div>
+    <script>
+        document.querySelectorAll('.copy-blueprint').forEach((button) => {
+            button.addEventListener('click', async () => {
+                const blueprint = button.dataset.blueprint;
+                if (!blueprint) {
+                    return;
+                }
+                try {
+                    await navigator.clipboard.writeText(blueprint);
+                    const original = button.textContent;
+                    button.textContent = 'Copiado ✓';
+                    setTimeout(() => {
+                        button.textContent = original;
+                    }, 1500);
+                } catch (error) {
+                    button.textContent = 'Falhou';
+                }
+            });
+        });
+    </script>
 </body>
 </html>

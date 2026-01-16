@@ -190,6 +190,20 @@ button:hover {
   margin-top: 20px;
 }
 
+.decision-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.decision-confidence {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
 .decision-grid {
   display: grid;
   gap: 16px;
@@ -231,6 +245,16 @@ button:hover {
   color: var(--muted);
 }
 
+.copy-blueprint {
+  margin-top: 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+
 .blueprint ul {
   margin: 0;
   padding-left: 18px;
@@ -247,6 +271,39 @@ button:hover {
 .decision-note {
   margin-top: 12px;
   color: var(--muted);
+}
+
+.evidence {
+  margin-top: 20px;
+}
+
+.evidence-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.evidence-card {
+  background: #0b1220;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.evidence-title {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+
+.evidence-title a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.evidence-meta,
+.evidence-why {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 ul {
