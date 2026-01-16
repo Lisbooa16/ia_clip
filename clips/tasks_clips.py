@@ -46,83 +46,99 @@ def render_clip(
         srt_path = subs_dir / f"{clip.id}.srt"
         srt_path.write_text(srt_text, encoding="utf-8")
 
-        # 2️⃣ CARREGA FOCO E FACES
-        with open(clip_dir / "focus_timeline.json") as f:
-            focus_timeline = json.load(f)
+        focus_timeline_path = clip_dir / "focus_timeline.json"
+        faces_tracked_path = clip_dir / "faces_tracked.json"
 
-        with open(clip_dir / "faces_tracked.json") as f:
-            faces_tracked = json.load(f)
+        if focus_timeline_path.exists() and faces_tracked_path.exists():
+            # 2️⃣ CARREGA FOCO E FACES
+            with open(focus_timeline_path) as f:
+                focus_timeline = json.load(f)
 
-        # 3️⃣ SPLIT DO CLIP POR FOCO
-        focus_blocks = focus_blocks_for_clip(
-            focus_timeline,
-            start,
-            end
-        )
+            with open(faces_tracked_path) as f:
+                faces_tracked = json.load(f)
 
-        if not focus_blocks:
-            raise RuntimeError("Nenhum bloco de foco encontrado")
-
-        temp_files = []
-
-        # 4️⃣ RENDER DE CADA BLOCO
-        for idx, block in enumerate(focus_blocks):
-            face_id = block["face_id"]
-
-            face_box = average_face_box(
-                faces_tracked,
-                face_id,
-                block["start"],
-                block["end"],
+            # 3️⃣ SPLIT DO CLIP POR FOCO
+            focus_blocks = focus_blocks_for_clip(
+                focus_timeline,
+                start,
+                end
             )
 
-            crop = None
-            if face_box:
-                crop = compute_vertical_crop(
-                    face_box,
-                    frame_w=1920,
-                    frame_h=1080,
+            if not focus_blocks:
+                raise RuntimeError("Nenhum bloco de foco encontrado")
+
+            temp_files = []
+
+            # 4️⃣ RENDER DE CADA BLOCO
+            for idx, block in enumerate(focus_blocks):
+                face_id = block["face_id"]
+
+                face_box = average_face_box(
+                    faces_tracked,
+                    face_id,
+                    block["start"],
+                    block["end"],
                 )
 
-            temp_out = media_root / "tmp" / f"{clip.id}_{idx}.mp4"
-            temp_out.parent.mkdir(parents=True, exist_ok=True)
+                crop = None
+                if face_box:
+                    crop = compute_vertical_crop(
+                        face_box,
+                        frame_w=1920,
+                        frame_h=1080,
+                    )
 
-            make_vertical_clip_with_focus(
+                temp_out = media_root / "tmp" / f"{clip.id}_{idx}.mp4"
+                temp_out.parent.mkdir(parents=True, exist_ok=True)
+
+                make_vertical_clip_with_focus(
+                    video_path=video_path,
+                    start=block["start"],
+                    end=block["end"],
+                    subtitle_path=str(srt_path),
+                    media_root=media_root,
+                    clip_id=temp_out.stem,
+                    crop=crop,
+                    output_path=temp_out,
+                )
+
+                temp_files.append(temp_out)
+
+            # 5️⃣ CONCATENA
+            concat_file = media_root / "tmp" / f"{clip.id}_concat.txt"
+            with open(concat_file, "w") as f:
+                for t in temp_files:
+                    f.write(f"file '{t.as_posix()}'\n")
+
+            final_out = media_root / "videos" / "clips" / f"{clip.id}.mp4"
+            final_out.parent.mkdir(parents=True, exist_ok=True)
+
+            cmd = [
+                FFMPEG_BIN, "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(concat_file),
+                "-c", "copy",
+                str(final_out),
+            ]
+
+            subprocess.check_call(cmd)
+
+            clip.output_path = str(final_out)
+            clip.caption = ""
+            clip.save(update_fields=["output_path", "caption"])
+        else:
+            out_mp4, caption = make_vertical_clip_with_captions(
                 video_path=video_path,
-                start=block["start"],
-                end=block["end"],
+                start=start,
+                end=end,
                 subtitle_path=str(srt_path),
                 media_root=media_root,
-                clip_id=temp_out.stem,
-                crop=crop,
-                output_path=temp_out,
+                clip_id=str(clip.id),
             )
-
-            temp_files.append(temp_out)
-
-        # 5️⃣ CONCATENA
-        concat_file = media_root / "tmp" / f"{clip.id}_concat.txt"
-        with open(concat_file, "w") as f:
-            for t in temp_files:
-                f.write(f"file '{t.as_posix()}'\n")
-
-        final_out = media_root / "videos" / "clips" / f"{clip.id}.mp4"
-        final_out.parent.mkdir(parents=True, exist_ok=True)
-
-        cmd = [
-            FFMPEG_BIN, "-y",
-            "-f", "concat",
-            "-safe", "0",
-            "-i", str(concat_file),
-            "-c", "copy",
-            str(final_out),
-        ]
-
-        subprocess.check_call(cmd)
-
-        clip.output_path = str(final_out)
-        clip.caption = ""
-        clip.save(update_fields=["output_path", "caption"])
+            clip.output_path = out_mp4
+            clip.caption = caption
+            clip.save(update_fields=["output_path", "caption"])
 
     except Exception as e:
         clip.caption = "Erro ao renderizar clip"
