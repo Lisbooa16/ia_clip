@@ -267,6 +267,7 @@ def render_clip(
         silence_hold = 0.4
         min_motion_window = 0.2
         transcript_boost = 1.5
+        crop_deadzone = 16
 
         def _find_face_box(face_id, t):
             samples = face_index.get(face_id)
@@ -514,6 +515,7 @@ def render_clip(
                     frame_w=1920,
                     frame_h=1080,
                 )
+            target_crop = crop
 
             if face_id is None and last_face_id is not None and (block_start - last_speech_end) < silence_hold:
                 face_id = last_face_id
@@ -522,8 +524,24 @@ def render_clip(
                 crop = None
             elif crop is None and last_crop is not None:
                 crop = last_crop
-            elif last_face_id is not None and face_id == last_face_id and last_crop is not None:
-                crop = last_crop
+            elif (
+                last_face_id is not None
+                and face_id == last_face_id
+                and last_crop is not None
+                and crop is not None
+                and target_crop is not None
+            ):
+                if (
+                    abs(target_crop["x"] - last_crop["x"]) < crop_deadzone
+                    and abs(target_crop["y"] - last_crop["y"]) < crop_deadzone
+                ):
+                    print(
+                        "[CROP] 🧊 "
+                        f"deadzone hold face_id={face_id} "
+                        f"target=({target_crop['x']},{target_crop['y']}) "
+                        f"prev=({last_crop['x']},{last_crop['y']})"
+                    )
+                    crop = last_crop
 
             if crop:
                 print(
@@ -545,6 +563,14 @@ def render_clip(
                 and face_id != last_face_id
             )
             confirmed_switch = requested_switch
+            if crop and target_crop:
+                lock_state = "transition" if requested_switch else "locked"
+                print(
+                    "[CROP] 🎯 "
+                    f"face_id={face_id} "
+                    f"target_x={target_crop['x']} applied_x={crop['x']} "
+                    f"state={lock_state}"
+                )
 
             if requested_switch and confirmed_switch and block_duration > min_transition:
                 pre_focus_end = min(block_start + confirm_window, block_end)
