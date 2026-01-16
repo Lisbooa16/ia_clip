@@ -159,6 +159,18 @@
                                             {% endfor %}
                                         </ul>
                                     </div>
+                                    <form method="post" action="{% url 'analysis_generate_clip' %}" class="generate-form">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="url" value="{{ url }}">
+                                        <input type="hidden" name="idea" value="{{ decision.idea }}">
+                                        <input type="hidden" name="opening" value="{{ decision.blueprint.opening }}">
+                                        <input type="hidden" name="setup" value="{{ decision.blueprint.setup }}">
+                                        <input type="hidden" name="context" value="{{ decision.blueprint.context }}">
+                                        <input type="hidden" name="tension" value="{{ decision.blueprint.tension }}">
+                                        <input type="hidden" name="reveal" value="{{ decision.blueprint.reveal }}">
+                                        <input type="hidden" name="ending" value="{{ decision.ending }}">
+                                        <button type="submit" class="generate-clip">Gerar clip desta ideia</button>
+                                    </form>
                                 {% endif %}
                                 {% with blueprint_text="Abertura: "|add:decision.blueprint.opening|add:"\nSetup: "|add:decision.blueprint.setup|add:"\nContexto: "|add:decision.blueprint.context|add:"\nTensão: "|add:decision.blueprint.tension|add:"\nRevelação: "|add:decision.blueprint.reveal|add:"\nFinal: "|add:decision.ending %}
                                     <button class="copy-blueprint" data-blueprint="{{ blueprint_text|escapejs }}">Copiar blueprint</button>
