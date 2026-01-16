@@ -23,17 +23,62 @@ def average_face_box(faces_tracked, face_id, start, end):
 
 
 def compute_vertical_crop(face_box, frame_w, frame_h):
-    cx = face_box["x"] + face_box["w"] // 2
+    x = float(face_box["x"])
+    y = float(face_box["y"])
+    w = float(face_box["w"])
+    h = float(face_box["h"])
+
+    left_pad = 0.25 * w
+    right_pad = 0.25 * w
+    top_pad = 0.35 * h
+    bottom_pad = 0.25 * h
+
+    exp_left = max(0.0, x - left_pad)
+    exp_top = max(0.0, y - top_pad)
+    exp_right = min(float(frame_w), x + w + right_pad)
+    exp_bottom = min(float(frame_h), y + h + bottom_pad)
+
+    face_center_x = x + w * 0.5
+    face_center_y = y + h * 0.45
 
     crop_w = int(frame_h * 9 / 16)
     crop_h = frame_h
 
-    x = max(0, min(cx - crop_w // 2, frame_w - crop_w))
-    y = 0
+    desired_x = face_center_x - crop_w / 2
+    min_x = exp_right - crop_w
+    max_x = exp_left
+    if min_x > max_x:
+        min_x, max_x = max_x, min_x
+    clamped = False
+    if desired_x < min_x:
+        desired_x = min_x
+        clamped = True
+    if desired_x > max_x:
+        desired_x = max_x
+        clamped = True
+
+    desired_x = max(0.0, min(desired_x, frame_w - crop_w))
+    if desired_x in (0.0, frame_w - crop_w):
+        clamped = True
+
+    last_x = getattr(compute_vertical_crop, "_last_x", None)
+    if last_x is None:
+        smooth_x = desired_x
+    else:
+        smooth_x = last_x * 0.7 + desired_x * 0.3
+    compute_vertical_crop._last_x = smooth_x
+
+    print(
+        "[CROP] 🧭 "
+        f"raw=({x:.1f},{y:.1f},{w:.1f},{h:.1f}) "
+        f"exp=({exp_left:.1f},{exp_top:.1f},{exp_right-exp_left:.1f},{exp_bottom-exp_top:.1f}) "
+        f"crop=({smooth_x:.1f},0.0,{crop_w},{crop_h}) "
+        f"clamp={clamped} center_y={face_center_y:.1f}"
+    )
 
     return {
-        "x": int(x),
-        "y": int(y),
+        "x": int(round(smooth_x)),
+        "y": 0,
         "w": crop_w,
         "h": crop_h,
     }
