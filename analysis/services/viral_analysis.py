@@ -97,6 +97,7 @@ class ViralAnalysisResult:
     similar_videos: list[dict[str, Any]]
     evidence_videos: list[dict[str, Any]]
     editorial_decisions: list[dict[str, Any]]
+    sequence_preview: list[dict[str, Any]]
     discarded_reason: str | None
 
     def to_dict(self) -> dict[str, Any]:
@@ -115,6 +116,7 @@ class ViralAnalysisResult:
             "similar_videos": self.similar_videos,
             "evidence_videos": self.evidence_videos,
             "editorial_decisions": self.editorial_decisions,
+            "sequence_preview": self.sequence_preview,
             "discarded_reason": self.discarded_reason,
         }
 
@@ -295,6 +297,42 @@ def _build_opening_strategies(
         strategies.append(f"Destacar {tension.lower()} como cartão inicial antes da linha do tempo.")
 
     return strategies[:4]
+
+
+def _build_sequence_preview(duration: int | None, platform: str) -> list[dict[str, Any]]:
+    if not duration:
+        return []
+
+    limits = {
+        "tt": (18, 30),
+        "ig": (20, 30),
+        "yt": (20, 35),
+        "other": (18, 30),
+    }
+    ideal_min, ideal_max = limits.get(platform, (18, 30))
+
+    roles = ["hook", "context"]
+    if duration >= 90:
+        roles.append("payoff")
+
+    if duration < 30:
+        roles = ["hook"]
+
+    role_ranges = {
+        "hook": (max(10, ideal_min), min(20, ideal_max)),
+        "context": (max(20, ideal_min), min(35, ideal_max)),
+        "payoff": (max(20, ideal_min), min(30, ideal_max)),
+    }
+
+    preview = []
+    for role in roles:
+        start, end = role_ranges[role]
+        preview.append({
+            "role": role,
+            "duration": f\"{int(start)}–{int(end)}s\",
+        })
+
+    return preview
 
 
 def _build_editorial_blueprint(subject: str, action: str, tension: str) -> dict[str, str]:
@@ -500,6 +538,17 @@ def build_analysis(url: str) -> ViralAnalysisResult:
 
     evidence_videos = similar_videos[:3]
 
+    platform_key = {
+        "youtube": "yt",
+        "tiktok": "tt",
+        "instagram": "ig",
+    }.get(platform, "other")
+
+    sequence_preview = _build_sequence_preview(
+        duration=duration,
+        platform=platform_key,
+    )
+
     return ViralAnalysisResult(
         platform=platform,
         metadata={
@@ -524,5 +573,6 @@ def build_analysis(url: str) -> ViralAnalysisResult:
         similar_videos=similar_videos,
         evidence_videos=evidence_videos,
         editorial_decisions=ranked_decisions,
+        sequence_preview=sequence_preview,
         discarded_reason=discarded_reason,
     )

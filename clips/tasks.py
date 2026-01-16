@@ -12,15 +12,12 @@ from .media.face_smoothing import smooth_faces
 from .media.face_tracking import track_faces
 from .models import VideoJob
 from .services import (
-    detect_source, download_video,
-    transcribe_with_words, pick_viral_windows, transcribe_with_words_to_file
+    download_video,
+    transcribe_with_words_to_file,
 )
 from .services.clip_service import generate_clips
 from .tasks_clips import render_clip, finalize_job
-from .translator import translate_blueprint_to_cut_plan
-from subtitles.subtitle_builder import segments_for_clip, fill_gaps, to_srt
-from .services import make_vertical_clip_with_captions
-from .models import VideoClip
+from .translator import translate_blueprint_to_cut_plan, generate_clip_sequence
 
 
 @shared_task(bind=True)
@@ -314,6 +311,7 @@ def pick_and_render(self, job_id: int):
                 start=p["start"],
                 end=p["end"],
                 score=p["score"],
+                role=None,
             ).set(queue="clips_cpu")
         )
 
@@ -360,48 +358,51 @@ def generate_clip_from_blueprint(self, job_id: int, blueprint_path: str):
         blueprint_data = blueprint.get("blueprint", {})
 
         transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
-        cut_plan = translate_blueprint_to_cut_plan(transcript, blueprint_data)
+
+        clip_dir = media_root / "clips" / str(job.id)
+        clip_dir.mkdir(parents=True, exist_ok=True)
+
+        fps_sample = 1
+        faces = detect_faces(job.original_path, fps_sample=fps_sample)
+        faces_smooth = smooth_faces(faces, alpha=0.75)
+        faces_tracked = track_faces(faces_smooth) if faces_smooth else []
+
+        faces_tracked_path = clip_dir / "faces_tracked.json"
+        with open(faces_tracked_path, "w", encoding="utf-8") as f:
+            json.dump(faces_tracked, f, ensure_ascii=False, indent=2)
+
+        focus_timeline = build_focus_timeline(
+            faces_tracked=faces_tracked,
+            transcript=transcript,
+        )
+        focus_path = clip_dir / "focus_timeline.json"
+        with open(focus_path, "w", encoding="utf-8") as f:
+            json.dump(focus_timeline, f, indent=2)
+
+        cut_plans = generate_clip_sequence(transcript, blueprint_data, job.source or "other")
+        if not cut_plans:
+            cut_plans = [translate_blueprint_to_cut_plan(transcript, blueprint_data)]
 
         job.status = "clipping"
         job.save(update_fields=["status"])
 
-        clip = VideoClip.objects.create(
-            job=job,
-            start=cut_plan["start"],
-            end=cut_plan["end"],
-            score=0,
-            caption="",
-            output_path="",
+        clip_tasks = []
+        for plan in cut_plans:
+            clip_tasks.append(
+                render_clip.s(
+                    job_id=job.id,
+                    video_path=job.original_path,
+                    transcript=transcript,
+                    start=plan["start"],
+                    end=plan["end"],
+                    score=0,
+                    role=plan.get("role"),
+                ).set(queue="clips_cpu")
+            )
+
+        chord(clip_tasks)(
+            finalize_job.s(job.id).set(queue="clips_cpu")
         )
-
-        segments = segments_for_clip(
-            transcript.get("segments", []),
-            cut_plan["start"],
-            cut_plan["end"],
-        )
-        segments = fill_gaps(segments)
-        srt_text = to_srt(segments)
-
-        subs_dir = media_root / "subs"
-        subs_dir.mkdir(parents=True, exist_ok=True)
-        srt_path = subs_dir / f"{clip.id}.srt"
-        srt_path.write_text(srt_text, encoding="utf-8")
-
-        out_mp4, caption = make_vertical_clip_with_captions(
-            video_path=str(job.original_path),
-            start=cut_plan["start"],
-            end=cut_plan["end"],
-            subtitle_path=str(srt_path),
-            media_root=media_root,
-            clip_id=str(clip.id),
-        )
-
-        clip.output_path = out_mp4
-        clip.caption = caption
-        clip.save(update_fields=["output_path", "caption"])
-
-        job.status = "done"
-        job.save(update_fields=["status"])
 
     except Exception as e:
         job.status = "error"

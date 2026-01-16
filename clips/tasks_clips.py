@@ -21,6 +21,7 @@ def render_clip(
     start: float,
     end: float,
     score: float,
+    role: str | None = None,
 ):
     media_root = Path(settings.MEDIA_ROOT)
     clip_dir = media_root / "clips" / str(job_id)
@@ -31,7 +32,7 @@ def render_clip(
         start=start,
         end=end,
         score=score,
-        caption="",
+        caption=role or "",
         output_path="",
     )
 
@@ -156,11 +157,33 @@ def render_clip(
                 media_root=media_root,
                 clip_id=str(clip.id),
             )
-            clip.output_path = out_mp4
-            clip.caption = caption
-            clip.save(update_fields=["output_path", "caption"])
 
-    except Exception as e:
+            temp_files.append(temp_out)
+
+        # 5️⃣ CONCATENA
+        concat_file = media_root / "tmp" / f"{clip.id}_concat.txt"
+        with open(concat_file, "w") as f:
+            for t in temp_files:
+                f.write(f"file '{t.as_posix()}'\n")
+
+        final_out = media_root / "videos" / "clips" / f"{clip.id}.mp4"
+        final_out.parent.mkdir(parents=True, exist_ok=True)
+
+        cmd = [
+            FFMPEG_BIN, "-y",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", str(concat_file),
+            "-c", "copy",
+            str(final_out),
+        ]
+
+        subprocess.check_call(cmd)
+
+        clip.output_path = str(final_out)
+        clip.save(update_fields=["output_path"])
+
+    except Exception:
         clip.caption = "Erro ao renderizar clip"
         clip.save(update_fields=["caption"])
         raise

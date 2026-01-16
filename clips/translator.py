@@ -107,3 +107,91 @@ def translate_blueprint_to_cut_plan(
         "focus": "auto",
         "subtitle_style": "normal",
     }
+
+
+def generate_clip_sequence(
+    transcript: dict[str, Any],
+    blueprint: dict[str, str],
+    platform: str,
+) -> list[dict[str, Any]]:
+    segments = sorted(transcript.get("segments", []), key=lambda s: s["start"])
+    if not segments:
+        return [translate_blueprint_to_cut_plan(transcript, blueprint) | {"role": "hook"}]
+
+    total_duration = float(segments[-1]["end"])
+    platform_max = {
+        "tt": 40.0,
+        "ig": 40.0,
+        "yt": 45.0,
+        "other": 40.0,
+    }.get(platform, 40.0)
+
+    if total_duration < 30:
+        plan = translate_blueprint_to_cut_plan(transcript, blueprint)
+        plan["role"] = "hook"
+        return [plan]
+
+    roles = ["hook", "context"]
+    if total_duration >= 90:
+        roles.append("payoff")
+    if blueprint.get("ending") == "Cliffhanger" and total_duration >= 120:
+        roles.append("cliffhanger")
+
+    role_targets = {
+        "hook": min(20.0, platform_max),
+        "context": min(32.0, platform_max),
+        "payoff": min(28.0, platform_max),
+        "cliffhanger": min(22.0, platform_max),
+    }
+
+    windows: list[dict[str, Any]] = []
+
+    def _overlaps(start: float, end: float) -> bool:
+        for w in windows:
+            overlap = min(end, w["end"]) - max(start, w["start"])
+            if overlap > 0:
+                duration = min(end - start, w["end"] - w["start"])
+                if duration > 0 and overlap / duration > 0.35:
+                    return True
+        return False
+
+    for role in roles:
+        target = max(8.0, role_targets[role])
+        start_min = 0.0
+        start_max = max(total_duration - target, 0.0)
+
+        if role == "hook":
+            start_min = 0.0
+            start_max = total_duration * 0.5
+        elif role == "context":
+            start_min = total_duration * 0.2
+            start_max = total_duration * 0.6
+        elif role == "payoff":
+            start_min = total_duration * 0.5
+            start_max = total_duration * 0.85
+        elif role == "cliffhanger":
+            start_min = total_duration * 0.6
+            start_max = total_duration * 0.9
+
+        start, end = _best_window(segments, total_duration, target, start_min, start_max)
+
+        if end - start > platform_max:
+            end = start + platform_max
+
+        if _overlaps(start, end):
+            continue
+
+        windows.append({
+            "start": round(start, 2),
+            "end": round(end, 2),
+            "focus": "auto",
+            "subtitle_style": "normal",
+            "role": role,
+        })
+
+    if not windows:
+        plan = translate_blueprint_to_cut_plan(transcript, blueprint)
+        plan["role"] = "hook"
+        windows.append(plan)
+
+    return windows[:4]
