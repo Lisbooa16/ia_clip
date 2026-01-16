@@ -150,26 +150,77 @@ def render_clip(
             prev = None
             total = 0.0
             count = 0
+            logged_resize = False
+            logged_skip = False
+            logged_shape = False
             for t in times:
                 face_box = _find_face_box(face_id, t)
                 if not face_box:
+                    if not logged_skip:
+                        print(f"[MOUTH] ⏭️ skip no face box t={t:.2f}")
+                        logged_skip = True
+                    total += 0.0
+                    count += 1
+                    prev = None
                     continue
                 cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
                 ok, frame = cap.read()
                 if not ok:
+                    if not logged_skip:
+                        print(f"[MOUTH] ⏭️ skip frame read t={t:.2f}")
+                        logged_skip = True
+                    total += 0.0
+                    count += 1
+                    prev = None
                     continue
                 x, y, w, h = _mouth_region(face_box)
-                x = max(0, min(x, frame.shape[1] - 1))
-                y = max(0, min(y, frame.shape[0] - 1))
-                w = max(1, min(w, frame.shape[1] - x))
-                h = max(1, min(h, frame.shape[0] - y))
-                mouth = frame[y:y + h, x:x + w]
-                gray = cv2.cvtColor(mouth, cv2.COLOR_BGR2GRAY)
-                if prev is not None:
-                    diff = cv2.absdiff(prev, gray)
-                    total += float(np.mean(diff))
+                if x < 0 or y < 0 or w <= 0 or h <= 0:
+                    if not logged_skip:
+                        print(f"[MOUTH] ⏭️ skip invalid roi t={t:.2f} roi=({x},{y},{w},{h})")
+                        logged_skip = True
+                    total += 0.0
                     count += 1
-                prev = gray
+                    prev = None
+                    continue
+                if x + w > frame.shape[1] or y + h > frame.shape[0]:
+                    if not logged_skip:
+                        print(f"[MOUTH] ⏭️ skip oob roi t={t:.2f} roi=({x},{y},{w},{h})")
+                        logged_skip = True
+                    total += 0.0
+                    count += 1
+                    prev = None
+                    continue
+
+                mouth = frame[y:y + h, x:x + w]
+                if mouth.size == 0:
+                    if not logged_skip:
+                        print(f"[MOUTH] ⏭️ skip empty roi t={t:.2f}")
+                        logged_skip = True
+                    total += 0.0
+                    count += 1
+                    prev = None
+                    continue
+
+                try:
+                    gray = cv2.cvtColor(mouth, cv2.COLOR_BGR2GRAY)
+                    target_size = (64, 32)
+                    resized = cv2.resize(gray, target_size, interpolation=cv2.INTER_AREA)
+                    if not logged_resize:
+                        print(f"[MOUTH] 📏 resize roi to={target_size}")
+                        logged_resize = True
+                    if prev is not None:
+                        if not logged_shape:
+                            print(f"[MOUTH] 🔍 diff roi shape prev={prev.shape} curr={resized.shape}")
+                            logged_shape = True
+                        diff = cv2.absdiff(prev, resized)
+                        total += float(np.mean(diff))
+                        count += 1
+                    prev = resized
+                except cv2.error:
+                    print("[MOUTH] ⚠️ cv2.error diff fallback=0")
+                    total += 0.0
+                    count += 1
+                    prev = None
             if count == 0:
                 return None
             return total / count
