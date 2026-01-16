@@ -329,7 +329,7 @@ def _build_sequence_preview(duration: int | None, platform: str) -> list[dict[st
         start, end = role_ranges[role]
         preview.append({
             "role": role,
-            "duration": f\"{int(start)}–{int(end)}s\",
+            "duration": f"{int(start)}-{int(end)}s",
         })
 
     return preview
