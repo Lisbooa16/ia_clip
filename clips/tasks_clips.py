@@ -124,6 +124,7 @@ def render_clip(
         confirm_offset = 0.12
         confirm_window = 0.22
         silence_hold = 0.4
+        min_motion_window = 0.2
 
         def _find_face_box(face_id, t):
             samples = face_index.get(face_id)
@@ -225,6 +226,7 @@ def render_clip(
                 return None
             return total / count
 
+        transcript_segments = transcript.get("segments", [])
         last_speech_end = start
         # 4️⃣ RENDER DE CADA BLOCO
         last_face_id = None
@@ -233,6 +235,64 @@ def render_clip(
             block_start = block["start"]
             block_end = block["end"]
             block_duration = block_end - block_start
+
+            visible_face_ids = sorted({
+                face.get("face_id")
+                for face in faces_tracked
+                if block_start <= face.get("time", 0) <= block_end
+            })
+            visible_face_ids = [fid for fid in visible_face_ids if fid is not None]
+
+            has_speech = any(
+                seg["end"] > block_start and seg["start"] < block_end
+                for seg in transcript_segments
+            )
+            selected_face_id = face_id
+            motion_scores = {}
+            if use_motion_check and visible_face_ids:
+                score_start = block_start + confirm_offset
+                score_end = min(block_end, score_start + confirm_window)
+                if score_end - score_start >= min_motion_window:
+                    for candidate_id in visible_face_ids:
+                        motion_scores[candidate_id] = _mouth_motion_score(
+                            candidate_id,
+                            score_start,
+                            score_end,
+                        ) or 0.0
+                    boosted_scores = dict(motion_scores)
+                    if has_speech and face_id in boosted_scores:
+                        boosted_scores[face_id] = boosted_scores[face_id] + motion_threshold
+                    print(
+                        f"[FOCUS] 👥 visible={visible_face_ids} "
+                        f"scores={motion_scores} boosted={boosted_scores}"
+                    )
+                    active = {fid: score for fid, score in boosted_scores.items() if score >= motion_threshold}
+                    if active:
+                        best_id = max(active, key=active.get)
+                        best_score = active[best_id]
+                        selected_face_id = best_id
+                        print(
+                            "[FOCUS] 🎯 "
+                            f"select={selected_face_id} score={best_score}"
+                        )
+                    else:
+                        rejected = {fid: score for fid, score in boosted_scores.items() if score < motion_threshold}
+                        print(
+                            "[FOCUS] 🚫 "
+                            f"no active speaker rejected={rejected} "
+                            f"threshold={motion_threshold}"
+                        )
+                        selected_face_id = last_face_id or face_id
+                else:
+                    selected_face_id = last_face_id or face_id
+
+            if selected_face_id != face_id:
+                print(
+                    "[FOCUS] 🔁 "
+                    f"override {face_id}->{selected_face_id} "
+                    f"speech={has_speech}"
+                )
+                face_id = selected_face_id
 
             face_box = None
             if face_id is not None:
