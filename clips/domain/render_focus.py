@@ -148,23 +148,37 @@ def build_dynamic_crop_expr(
     smooth_window=5,
     max_points=60,
 ):
-    points = [
+    all_points = [
         (float(face["time"]), float(face["x"]) + float(face["w"]) * 0.5)
         for face in faces_tracked
         if face.get("face_id") == face_id
-        and start <= face.get("time", 0.0) <= end
     ]
-    if not points:
+    if not all_points:
         return None
 
-    points.sort(key=lambda item: item[0])
+    all_points.sort(key=lambda item: item[0])
+    window_points = [
+        p for p in all_points
+        if start <= p[0] <= end
+    ]
+    if not window_points:
+        nearest = min(all_points, key=lambda p: abs(p[0] - start))
+        center_expr = f"{nearest[1]:.1f}"
+        crop_w = "(ih*9/16)"
+        x_expr = f"max(min({center_expr}-{crop_w}/2,iw-{crop_w}),0)"
+        return f"w={crop_w}:h=ih:x='{x_expr}':y=0"
+
     sampled = []
     cursor = start
     idx = 0
-    last_center = points[0][1]
-    while cursor <= end and idx < len(points):
-        while idx < len(points) and points[idx][0] < cursor:
-            last_center = points[idx][1]
+    last_center = window_points[0][1]
+    while idx < len(all_points) and all_points[idx][0] < start:
+        last_center = all_points[idx][1]
+        idx += 1
+
+    while cursor <= end:
+        while idx < len(all_points) and all_points[idx][0] < cursor:
+            last_center = all_points[idx][1]
             idx += 1
         sampled.append((round(cursor - start, 3), last_center))
         cursor += sample_step
@@ -179,7 +193,7 @@ def build_dynamic_crop_expr(
 
     smoothed = smooth_face_centers(sampled, window_size=smooth_window)
 
-    crop_w = f"(ih*9/16)"
+    crop_w = "(ih*9/16)"
     expr_parts = []
     for idx in range(len(smoothed) - 1):
         t0, x0 = smoothed[idx]
@@ -196,9 +210,7 @@ def build_dynamic_crop_expr(
         expr_parts = [f"{center:.1f}"]
 
     center_expr = "(" + "+".join(expr_parts) + ")"
-    x_expr = (
-        f"max(min({center_expr}-{crop_w}/2,iw-{crop_w}),0)"
-    )
+    x_expr = f"max(min({center_expr}-{crop_w}/2,iw-{crop_w}),0)"
     return f"w={crop_w}:h=ih:x='{x_expr}':y=0"
 
 
