@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import subprocess
 import time
 import uuid
 from pathlib import Path
@@ -22,6 +23,7 @@ from .models import (
 from .services import (
     download_video,
     transcribe_with_words_to_file,
+    FFMPEG_BIN,
 )
 from .services.clip_service import generate_clips
 from .tasks_clips import render_clip, finalize_job
@@ -222,27 +224,72 @@ def _offset_faces_times(faces: list, window_start: float, window_duration: float
     return faces
 
 
+def _trim_video_window(
+    video_path: str,
+    start: float,
+    end: float,
+    temp_dir: Path,
+) -> Path | None:
+    try:
+        duration = float(end) - float(start)
+    except (TypeError, ValueError):
+        return None
+    if duration <= 0:
+        return None
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    output_path = temp_dir / f"faces_window_{start:.3f}_{end:.3f}_{uuid.uuid4().hex}.mp4"
+    cmd = [
+        FFMPEG_BIN,
+        "-y",
+        "-ss",
+        f"{start:.3f}",
+        "-t",
+        f"{duration:.3f}",
+        "-i",
+        video_path,
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-crf",
+        "18",
+        str(output_path),
+    ]
+    try:
+        subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        return None
+    if not output_path.exists():
+        return None
+    return output_path
+
+
 def _detect_faces_in_windows(
     video_path: str,
     windows: list[tuple[float, float]],
     fps_sample: int,
+    temp_dir: Path,
 ) -> tuple[list, bool]:
     if not windows:
         return detect_faces(video_path, fps_sample=fps_sample), False
 
     faces_collected = []
     for start, end in windows:
+        window_path = None
         try:
-            window_faces = detect_faces(
-                video_path,
-                fps_sample=fps_sample,
-                start_time=start,
-                end_time=end,
-            )
-        except TypeError:
-            return detect_faces(video_path, fps_sample=fps_sample), False
+            window_path = _trim_video_window(video_path, start, end, temp_dir)
+            if not window_path:
+                return detect_faces(video_path, fps_sample=fps_sample), False
+            window_faces = detect_faces(str(window_path), fps_sample=fps_sample)
         except Exception:
-            raise
+            return detect_faces(video_path, fps_sample=fps_sample), False
+        finally:
+            if window_path:
+                try:
+                    window_path.unlink()
+                except OSError:
+                    pass
         if window_faces:
             window_faces = _offset_faces_times(window_faces, start, end - start)
             faces_collected.extend(window_faces)
@@ -757,6 +804,7 @@ def generate_clip_from_blueprint(self, job_id: int, blueprint_path: str):
                     job.original_path,
                     windows,
                     fps_sample,
+                    clip_dir / "faces_windows_tmp",
                 )
             except Exception:
                 faces = detect_faces(job.original_path, fps_sample=fps_sample)
