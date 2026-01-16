@@ -183,6 +183,81 @@
       font-size: 13px;
     }
 
+    .progress-card {
+      display: grid;
+      gap: 14px;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 12px;
+      background: #111827;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .progress-bar > div {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #22c55e, #14b8a6);
+      transition: width 0.4s ease;
+    }
+
+    .progress-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 16px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .progress-meta strong {
+      color: var(--text);
+    }
+
+    .steps {
+      display: grid;
+      gap: 10px;
+    }
+
+    .step {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #0b1220;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .step.running {
+      border-color: #38bdf8;
+      color: var(--text);
+      box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2);
+    }
+
+    .step.done {
+      border-color: #22c55e;
+      color: var(--text);
+    }
+
+    .step.failed {
+      border-color: #ef4444;
+      color: #fecaca;
+      background: #2b1111;
+    }
+
+    .step-name {
+      font-weight: 700;
+      text-transform: capitalize;
+    }
+
+    .step-time {
+      font-variant-numeric: tabular-nums;
+    }
+
     footer {
       text-align: center;
       color: var(--muted);
@@ -219,6 +294,18 @@
         <div><b>Título</b><br>{{ job.title|default:"—" }}</div>
         <div><b>Clips gerados</b><br>{{ job.clips.count }}</div>
       </div>
+    </div>
+
+    <div class="card progress-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;">Progresso</h3>
+        <span class="progress" id="progress-status">Carregando…</span>
+      </div>
+      <div class="progress-bar">
+        <div id="progress-bar"></div>
+      </div>
+      <div class="progress-meta" id="progress-meta"></div>
+      <div class="steps" id="progress-steps"></div>
     </div>
 
     {% if job.error %}
@@ -284,11 +371,60 @@
       {% endif %}
     </div>
 
-    {% if job.status != "done" and job.status != "error" %}
       <script>
-        setTimeout(() => location.reload(), 3000);
+        const jobId = {{ job.id }};
+        const progressStatus = document.getElementById("progress-status");
+        const progressBar = document.getElementById("progress-bar");
+        const progressMeta = document.getElementById("progress-meta");
+        const progressSteps = document.getElementById("progress-steps");
+
+        const stepLabels = {
+          download: "Download",
+          faces: "Faces",
+          transcription: "Transcrição",
+          render: "Render",
+          finalize: "Finalização",
+        };
+
+        function formatDuration(seconds) {
+          if (seconds === null || seconds === undefined) return "—";
+          const mins = Math.floor(seconds / 60);
+          const secs = Math.floor(seconds % 60);
+          if (mins > 0) return `${mins}m ${secs}s`;
+          return `${secs}s`;
+        }
+
+        async function fetchProgress() {
+          try {
+            const resp = await fetch(`/jobs/${jobId}/progress/`);
+            const data = await resp.json();
+            progressStatus.textContent = `Atualizado • ${data.progress_percent}%`;
+            progressBar.style.width = `${data.progress_percent}%`;
+            progressMeta.innerHTML = `
+              <div><strong>Atual:</strong> ${data.current_step || "—"}</div>
+              <div><strong>Próximo:</strong> ${data.next_step || "—"}</div>
+              <div><strong>Tempo:</strong> ${formatDuration(data.elapsed_seconds)}</div>
+              <div><strong>ETA:</strong> ${formatDuration(data.estimated_remaining_seconds)}</div>
+            `;
+            progressSteps.innerHTML = "";
+            data.steps.forEach(step => {
+              const el = document.createElement("div");
+              const statusClass = step.status || "pending";
+              el.className = `step ${statusClass}`;
+              el.innerHTML = `
+                <span class="step-name">${stepLabels[step.name] || step.name}</span>
+                <span class="step-time">${formatDuration(step.duration)}</span>
+              `;
+              progressSteps.appendChild(el);
+            });
+          } catch (err) {
+            progressStatus.textContent = "Falha ao carregar progresso";
+          }
+        }
+
+        fetchProgress();
+        setInterval(fetchProgress, 2000);
       </script>
-    {% endif %}
 
     <footer>
       Clipper AI • processamento local • Django + Celery
