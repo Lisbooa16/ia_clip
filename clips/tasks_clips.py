@@ -84,53 +84,81 @@ def render_clip(
                 block["end"],
             )
 
-            crop = None
-            if face_box:
-                crop = compute_vertical_crop(
-                    face_box,
-                    frame_w=1920,
-                    frame_h=1080,
+            if not focus_blocks:
+                raise RuntimeError("Nenhum bloco de foco encontrado")
+
+            temp_files = []
+
+            # 4️⃣ RENDER DE CADA BLOCO
+            for idx, block in enumerate(focus_blocks):
+                face_id = block["face_id"]
+
+                face_box = average_face_box(
+                    faces_tracked,
+                    face_id,
+                    block["start"],
+                    block["end"],
                 )
 
-            temp_out = media_root / "tmp" / f"{clip.id}_{idx}.mp4"
-            temp_out.parent.mkdir(parents=True, exist_ok=True)
+                crop = None
+                if face_box:
+                    crop = compute_vertical_crop(
+                        face_box,
+                        frame_w=1920,
+                        frame_h=1080,
+                    )
 
-            make_vertical_clip_with_focus(
+                temp_out = media_root / "tmp" / f"{clip.id}_{idx}.mp4"
+                temp_out.parent.mkdir(parents=True, exist_ok=True)
+
+                make_vertical_clip_with_focus(
+                    video_path=video_path,
+                    start=block["start"],
+                    end=block["end"],
+                    subtitle_path=str(srt_path),
+                    media_root=media_root,
+                    clip_id=temp_out.stem,
+                    crop=crop,
+                    output_path=temp_out,
+                )
+
+                temp_files.append(temp_out)
+
+            # 5️⃣ CONCATENA
+            concat_file = media_root / "tmp" / f"{clip.id}_concat.txt"
+            with open(concat_file, "w") as f:
+                for t in temp_files:
+                    f.write(f"file '{t.as_posix()}'\n")
+
+            final_out = media_root / "videos" / "clips" / f"{clip.id}.mp4"
+            final_out.parent.mkdir(parents=True, exist_ok=True)
+
+            cmd = [
+                FFMPEG_BIN, "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(concat_file),
+                "-c", "copy",
+                str(final_out),
+            ]
+
+            subprocess.check_call(cmd)
+
+            clip.output_path = str(final_out)
+            clip.caption = ""
+            clip.save(update_fields=["output_path", "caption"])
+        else:
+            out_mp4, caption = make_vertical_clip_with_captions(
                 video_path=video_path,
-                start=block["start"],
-                end=block["end"],
+                start=start,
+                end=end,
                 subtitle_path=str(srt_path),
                 media_root=media_root,
-                clip_id=temp_out.stem,
-                crop=crop,
-                output_path=temp_out,
+                clip_id=str(clip.id),
             )
-
-            temp_files.append(temp_out)
-
-        # 5️⃣ CONCATENA
-        concat_file = media_root / "tmp" / f"{clip.id}_concat.txt"
-        with open(concat_file, "w") as f:
-            for t in temp_files:
-                f.write(f"file '{t.as_posix()}'\n")
-
-        final_out = media_root / "videos" / "clips" / f"{clip.id}.mp4"
-        final_out.parent.mkdir(parents=True, exist_ok=True)
-
-        cmd = [
-            FFMPEG_BIN, "-y",
-            "-f", "concat",
-            "-safe", "0",
-            "-i", str(concat_file),
-            "-c", "copy",
-            str(final_out),
-        ]
-
-        subprocess.check_call(cmd)
-
-        clip.output_path = str(final_out)
-        clip.caption = ""
-        clip.save(update_fields=["output_path", "caption"])
+            clip.output_path = out_mp4
+            clip.caption = caption
+            clip.save(update_fields=["output_path", "caption"])
 
     except Exception as e:
         clip.caption = "Erro ao renderizar clip"
