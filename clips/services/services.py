@@ -536,7 +536,7 @@ def make_vertical_clip_with_captions(
     subtitle_filter = None
     if subtitle_path and Path(subtitle_path).exists():
         subtitle_filter = f"subtitles=filename='{sub_path}':force_style='{subtitle_style}'"
-    elif subtitle_path:
+    else:
         print(f"[SUB] ⚠️ missing subtitles path={subtitle_path}")
 
     vf_parts = [
@@ -629,7 +629,7 @@ def make_vertical_clip_with_focus(
     subtitle_filter = None
     if subtitle_path and Path(subtitle_path).exists():
         subtitle_filter = f"subtitles=filename='{sub_path}':force_style='{subtitle_style}'"
-    elif subtitle_path:
+    else:
         print(f"[SUB] ⚠️ missing subtitles path={subtitle_path}")
 
     vf_parts = ["setpts=PTS-STARTPTS"]
@@ -677,93 +677,6 @@ def make_vertical_clip_with_focus(
         fallback_cmd[fallback_cmd.index("-preset") + 1] = "ultrafast"
         fallback_cmd[fallback_cmd.index("-crf") + 1] = "23"
         print("[RENDER] ⚠️ fallback render retry")
-        subprocess.check_call(fallback_cmd)
-
-
-def trim_clip(
-    video_path: str,
-    start: float,
-    end: float,
-    output_path: Path,
-):
-    cmd = [
-        FFMPEG_BIN, "-y",
-        "-ss", f"{start:.3f}",
-        "-to", f"{end:.3f}",
-        "-i", video_path,
-        "-vf", "setpts=PTS-STARTPTS",
-        "-af", "aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS",
-        "-r", "30",
-        "-fps_mode", "cfr",
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "20",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        str(output_path),
-    ]
-    try:
-        subprocess.check_call(cmd)
-    except subprocess.CalledProcessError:
-        fallback_cmd = cmd[:]
-        fallback_cmd[fallback_cmd.index("-preset") + 1] = "ultrafast"
-        fallback_cmd[fallback_cmd.index("-crf") + 1] = "23"
-        print("[RENDER] ⚠️ trim fallback retry")
-        subprocess.check_call(fallback_cmd)
-
-
-def burn_subtitles(
-    video_path: str,
-    subtitle_path: str,
-    output_path: Path,
-):
-    sub_path = subtitle_path.replace("\\", "/").replace(":", "\\:")
-    font_size = 44
-    margin_v = 140
-    margin_h = 64
-    font_size = max(36, min(font_size, 48))
-    margin_v = min(margin_v, 180)
-    subtitle_style = (
-        "FontName=Montserrat,"
-        f"FontSize={font_size},"
-        "PrimaryColour=&H00FFFFFF,"
-        "OutlineColour=&H00000000,"
-        "BackColour=&H00000000,"
-        "Bold=1,"
-        "Outline=2,"
-        "Shadow=1,"
-        "Alignment=2,"
-        f"MarginL={margin_h},"
-        f"MarginR={margin_h},"
-        f"MarginV={margin_v},"
-        "PlayResX=1080,"
-        "PlayResY=1920,"
-        "WrapStyle=2"
-    )
-    vf = (
-        f"subtitles=filename='{sub_path}':force_style='{subtitle_style}',"
-        "fps=30,format=yuv420p"
-    )
-    cmd = [
-        FFMPEG_BIN, "-y",
-        "-i", video_path,
-        "-vf", vf,
-        "-r", "30",
-        "-fps_mode", "cfr",
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "20",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        str(output_path),
-    ]
-    try:
-        subprocess.check_call(cmd)
-    except subprocess.CalledProcessError:
-        fallback_cmd = cmd[:]
-        fallback_cmd[fallback_cmd.index("-preset") + 1] = "ultrafast"
-        fallback_cmd[fallback_cmd.index("-crf") + 1] = "23"
-        print("[RENDER] ⚠️ subtitle burn fallback retry")
         subprocess.check_call(fallback_cmd)
 
 def transcribe_with_words_to_file(
