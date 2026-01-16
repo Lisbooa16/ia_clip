@@ -7,7 +7,7 @@ from django.conf import settings
 
 from subtitles.subtitle_builder import segments_for_clip, fill_gaps, to_srt
 from .domain.render_focus import average_face_box, compute_vertical_crop, find_focus_face, focus_blocks_for_clip
-from .models import VideoClip, VideoJob
+from .models import VideoClip, VideoJob, ensure_job_steps, update_job_step
 from .services import make_vertical_clip_with_captions, make_vertical_clip_with_focus, FFMPEG_BIN
 import subprocess
 
@@ -121,7 +121,9 @@ def render_clip(
                     frame_h=1080,
                 )
 
-            if crop is None and last_crop is not None:
+            if face_id is None:
+                crop = None
+            elif crop is None and last_crop is not None:
                 crop = last_crop
 
             if crop:
@@ -210,7 +212,8 @@ def render_clip(
         clip.output_path = str(final_out)
         clip.save(update_fields=["output_path"])
 
-    except Exception:
+    except Exception as e:
+        update_job_step(job_id, "render", "failed", message=str(e))
         clip.caption = "Erro ao renderizar clip"
         clip.save(update_fields=["caption"])
         raise
@@ -221,5 +224,9 @@ def render_clip(
 @shared_task(bind=True)
 def finalize_job(self, _results, job_id: int):
     job = VideoJob.objects.get(id=job_id)
+    ensure_job_steps(job)
+    update_job_step(job.id, "render", "done")
+    update_job_step(job.id, "finalize", "running")
     job.status = "done"
     job.save(update_fields=["status"])
+    update_job_step(job.id, "finalize", "done")

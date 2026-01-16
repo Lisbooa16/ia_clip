@@ -1,11 +1,11 @@
 from pathlib import Path
 
 from django.conf import settings
-from django.http import HttpResponseBadRequest
+from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST
 
-from .models import VideoJob, VideoClip
+from .models import VideoJob, VideoClip, get_job_progress
 from .services import make_vertical_clip_with_captions
 from .tasks import process_video_job
 
@@ -27,6 +27,56 @@ def home(request):
 def job_detail(request, job_id):
     job = get_object_or_404(VideoJob, id=job_id)
     return render(request, "clips/job_detail.html", {"job": job})
+
+def job_progress(request, job_id):
+    job = get_object_or_404(VideoJob, id=job_id)
+    data = get_job_progress(job)
+    if request.GET.get("format") == "html":
+        html = f"""
+        <!doctype html>
+        <html>
+        <head>
+            <meta charset="utf-8" />
+            <title>Job {job_id} Progress</title>
+            <style>
+                body {{ font-family: sans-serif; margin: 20px; }}
+                .bar {{ width: 100%; background: #eee; height: 18px; border-radius: 4px; overflow: hidden; }}
+                .bar > div {{ height: 100%; background: #4caf50; width: 0%; }}
+                .step {{ margin: 6px 0; }}
+                .running {{ font-weight: bold; }}
+            </style>
+        </head>
+        <body>
+            <h1>Job {job_id} Progress</h1>
+            <div class="bar"><div id="progress-bar"></div></div>
+            <p id="summary"></p>
+            <div id="steps"></div>
+            <script>
+                async function refresh() {{
+                    const resp = await fetch("{request.path}?format=json");
+                    const data = await resp.json();
+                    document.getElementById("progress-bar").style.width = data.progress_percent + "%";
+                    document.getElementById("summary").textContent =
+                        "Current: " + (data.current_step || "-") +
+                        " | Next: " + (data.next_step || "-") +
+                        " | Elapsed: " + data.elapsed_seconds + "s";
+                    const stepsEl = document.getElementById("steps");
+                    stepsEl.innerHTML = "";
+                    data.steps.forEach(step => {{
+                        const el = document.createElement("div");
+                        el.className = "step" + (step.status === "running" ? " running" : "");
+                        el.textContent = step.name + " - " + step.status + " (" + (step.duration ?? "-") + "s)";
+                        stepsEl.appendChild(el);
+                    }});
+                }}
+                refresh();
+                setInterval(refresh, 2000);
+            </script>
+        </body>
+        </html>
+        """
+        return HttpResponse(html)
+    return JsonResponse(data)
 
 @require_POST
 def reprocess_clip(request, clip_id):
