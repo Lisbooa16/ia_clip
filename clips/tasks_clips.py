@@ -65,8 +65,6 @@ def render_clip(
         else:
             faces_tracked = []
 
-        transcript_segments = transcript.get("segments", [])
-
         # 3️⃣ SPLIT DO CLIP POR FOCO
         focus_blocks = focus_blocks_for_clip(
             focus_timeline,
@@ -88,104 +86,7 @@ def render_clip(
             clip.save(update_fields=["output_path", "caption"])
             return str(clip.id)
 
-        def _build_focus_windows():
-            windows = []
-            cursor = start
-            for seg in transcript_segments:
-                seg_start = float(seg["start"])
-                seg_end = float(seg["end"])
-                if seg_end <= start:
-                    continue
-                if seg_start >= end:
-                    break
-                block_start = max(seg_start, start)
-                block_end = min(seg_end, end)
-                if block_start > cursor:
-                    windows.append({
-                        "start": round(cursor, 3),
-                        "end": round(block_start, 3),
-                        "face_id": find_focus_face(focus_timeline, cursor, block_start),
-                    })
-                windows.append({
-                    "start": round(block_start, 3),
-                    "end": round(block_end, 3),
-                    "face_id": find_focus_face(focus_timeline, block_start, block_end),
-                })
-                cursor = block_end
-            if cursor < end:
-                windows.append({
-                    "start": round(cursor, 3),
-                    "end": round(end, 3),
-                    "face_id": find_focus_face(focus_timeline, cursor, end),
-                })
-
-            min_block = 0.2
-            merged = []
-            for block in windows:
-                duration = block["end"] - block["start"]
-                if merged:
-                    prev = merged[-1]
-                    if block["face_id"] == prev["face_id"]:
-                        prev["end"] = max(prev["end"], block["end"])
-                        continue
-                    if duration < min_block:
-                        prev["end"] = max(prev["end"], block["end"])
-                        continue
-                if duration < min_block and merged:
-                    merged[-1]["end"] = max(merged[-1]["end"], block["end"])
-                    continue
-                merged.append(block)
-            return merged
-
-        if len(focus_blocks) <= 1 and transcript_segments and faces_tracked:
-            focus_blocks = _build_focus_windows() or focus_blocks
-            print(
-                "[RENDER] 🧭 "
-                f"rewindow blocks={len(focus_blocks)} clip_id={clip.id}"
-            )
-
         print(f"[RENDER] 🎯 focus_blocks={len(focus_blocks)} clip_id={clip.id}")
-        preview_blocks = []
-        all_crop_x = []
-        for idx, block in enumerate(focus_blocks):
-            face_id = block["face_id"]
-            face_box = None
-            if face_id is not None:
-                face_box = average_face_box(
-                    faces_tracked,
-                    face_id,
-                    block["start"],
-                    block["end"],
-                )
-            crop_preview = None
-            if face_box:
-                crop_preview = compute_vertical_crop(
-                    face_box,
-                    frame_w=1920,
-                    frame_h=1080,
-                )
-                all_crop_x.append(crop_preview["x"])
-            if idx < 10:
-                preview_blocks.append({
-                    "start": block["start"],
-                    "end": block["end"],
-                    "face_id": face_id,
-                    "crop_x": crop_preview["x"] if crop_preview else None,
-                })
-        if preview_blocks:
-            print("[FOCUS] 🔎 preview_blocks:")
-            for b in preview_blocks:
-                print(
-                    "[FOCUS] 🔎 "
-                    f"{b['start']:.3f}-{b['end']:.3f}s "
-                    f"face_id={b['face_id']} crop_x={b['crop_x']}"
-                )
-        if all_crop_x:
-            min_x = min(all_crop_x)
-            max_x = max(all_crop_x)
-            print(f"[FOCUS] 📏 crop_x range min={min_x} max={max_x}")
-            if min_x == max_x and len(focus_blocks) > 1:
-                print("[FOCUS] ⚠️ crop_x constant across blocks")
 
         temp_files = []
         last_crop = None
@@ -327,29 +228,9 @@ def render_clip(
                 return None
             return total / count
 
+        transcript_segments = transcript.get("segments", [])
         last_speech_end = start
         current_silence = 0.0
-
-        def _build_segment_srt(seg_start, seg_end, tag):
-            segs = segments_for_clip(transcript_segments, seg_start, seg_end)
-            if not segs:
-                print(
-                    "[SUB] ⚠️ "
-                    f"no segments {seg_start:.3f}-{seg_end:.3f}s tag={tag}"
-                )
-                return None
-            segs = fill_gaps(segs)
-            srt = to_srt(segs)
-            seg_path = subs_dir / f"{clip.id}_{tag}.srt"
-            seg_path.write_text(srt, encoding="utf-8")
-            first_start = segs[0]["start"] if segs else None
-            first_ms = int(first_start * 1000) if first_start is not None else None
-            print(
-                "[SUB] 🧭 "
-                f"segment={seg_start:.3f}-{seg_end:.3f}s "
-                f"first_ms={first_ms}"
-            )
-            return seg_path
         # 4️⃣ RENDER DE CADA BLOCO
         last_face_id = None
         for idx, block in enumerate(focus_blocks):
@@ -533,17 +414,11 @@ def render_clip(
                 if last_crop and pre_focus_end > block_start:
                     temp_out = media_root / "tmp" / f"{clip.id}_{idx}_pre.mp4"
                     temp_out.parent.mkdir(parents=True, exist_ok=True)
-                    seg_srt = _build_segment_srt(block_start, pre_focus_end, f"{idx}_pre")
-                    print(
-                        "[RENDER] 🧩 "
-                        f"segment={idx}_pre {block_start:.3f}-{pre_focus_end:.3f}s "
-                        f"crop=({last_crop['x']},{last_crop['y']})"
-                    )
                     make_vertical_clip_with_focus(
                         video_path=video_path,
                         start=block_start,
                         end=pre_focus_end,
-                        subtitle_path=str(seg_srt) if seg_srt else None,
+                        subtitle_path=str(srt_path),
                         media_root=media_root,
                         clip_id=temp_out.stem,
                         crop=last_crop,
@@ -565,23 +440,17 @@ def render_clip(
                     print(
                         "[RENDER] 🎞️ "
                         f"{seg_start:.3f}-{seg_end:.3f}s "
-                        f"crop x={step_crop['x']} y={step_crop['y']}"
-                    )
-                    print(
-                        "[RENDER] 🧩 "
-                        f"segment={idx}_t{step} {seg_start:.3f}-{seg_end:.3f}s "
-                        f"crop=({step_crop['x']},{step_crop['y']})"
+                        f"crop x={step_crop['x']}"
                     )
 
                     temp_out = media_root / "tmp" / f"{clip.id}_{idx}_t{step}.mp4"
                     temp_out.parent.mkdir(parents=True, exist_ok=True)
-                    seg_srt = _build_segment_srt(seg_start, seg_end, f"{idx}_t{step}")
 
                     make_vertical_clip_with_focus(
                         video_path=video_path,
                         start=seg_start,
                         end=seg_end,
-                        subtitle_path=str(seg_srt) if seg_srt else None,
+                        subtitle_path=str(srt_path),
                         media_root=media_root,
                         clip_id=temp_out.stem,
                         crop=step_crop,
@@ -598,24 +467,12 @@ def render_clip(
             if block_end - block_start > 0.001:
                 temp_out = media_root / "tmp" / f"{clip.id}_{idx}.mp4"
                 temp_out.parent.mkdir(parents=True, exist_ok=True)
-                seg_srt = _build_segment_srt(block_start, block_end, f"{idx}")
-                if crop:
-                    print(
-                        "[RENDER] 🧩 "
-                        f"segment={idx} {block_start:.3f}-{block_end:.3f}s "
-                        f"crop=({crop['x']},{crop['y']})"
-                    )
-                else:
-                    print(
-                        "[RENDER] 🧩 "
-                        f"segment={idx} {block_start:.3f}-{block_end:.3f}s center"
-                    )
 
                 make_vertical_clip_with_focus(
                     video_path=video_path,
                     start=block_start,
                     end=block_end,
-                    subtitle_path=str(seg_srt) if seg_srt else None,
+                    subtitle_path=str(srt_path),
                     media_root=media_root,
                     clip_id=temp_out.stem,
                     crop=crop,
