@@ -28,43 +28,6 @@ def average_face_box(faces_tracked, face_id, start, end):
     }
 
 
-def stable_face_box(faces_tracked, face_id, start, end):
-    boxes = [
-        f for f in faces_tracked
-        if f["face_id"] == face_id and start <= f["time"] <= end
-    ]
-
-    if not boxes:
-        return None
-
-    centers_x = sorted(b["x"] + b["w"] / 2 for b in boxes)
-    centers_y = sorted(b["y"] + b["h"] / 2 for b in boxes)
-    widths = [b["w"] for b in boxes]
-    heights = [b["h"] for b in boxes]
-    mid = len(centers_x) // 2
-    center_x = centers_x[mid]
-    center_y = centers_y[mid]
-    max_w = max(widths)
-    max_h = max(heights)
-    x = center_x - max_w / 2
-    y = center_y - max_h / 2
-
-    print(
-        "[FOCUS] 📦 "
-        f"face_id={face_id} samples={len(boxes)} "
-        f"center=({center_x:.1f},{center_y:.1f}) "
-        f"size=({max_w:.1f},{max_h:.1f}) "
-        f"window={start:.3f}-{end:.3f}s"
-    )
-
-    return {
-        "x": int(round(x)),
-        "y": int(round(y)),
-        "w": int(round(max_w)),
-        "h": int(round(max_h)),
-    }
-
-
 def compute_vertical_crop(face_box, frame_w, frame_h):
     x = float(face_box["x"])
     y = float(face_box["y"])
