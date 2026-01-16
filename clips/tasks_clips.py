@@ -8,10 +8,14 @@ from celery import shared_task
 from django.conf import settings
 
 from subtitles.subtitle_builder import segments_for_clip, fill_gaps, to_srt
-from .domain.render_focus import average_face_box, compute_vertical_crop, find_focus_face, focus_blocks_for_clip
+from .domain.render_focus import (
+    compute_vertical_crop,
+    find_focus_face,
+    focus_blocks_for_clip,
+    stable_face_box,
+)
 from .models import VideoClip, VideoJob, ensure_job_steps, update_job_step
 from .services import (
-    make_vertical_clip_with_captions,
     make_vertical_clip_with_focus,
     trim_clip,
     burn_subtitles,
@@ -79,20 +83,6 @@ def render_clip(
             end
         )
 
-        if not focus_blocks:
-            out_mp4, caption = make_vertical_clip_with_captions(
-                video_path=video_path,
-                start=start,
-                end=end,
-                subtitle_path=str(srt_path),
-                media_root=media_root,
-                clip_id=str(clip.id),
-            )
-            clip.output_path = out_mp4
-            clip.caption = caption
-            clip.save(update_fields=["output_path", "caption"])
-            return str(clip.id)
-
         def _build_focus_windows():
             windows = []
             cursor = start
@@ -150,47 +140,6 @@ def render_clip(
             )
 
         print(f"[RENDER] 🎯 focus_blocks={len(focus_blocks)} clip_id={clip.id}")
-        preview_blocks = []
-        all_crop_x = []
-        for idx, block in enumerate(focus_blocks):
-            face_id = block["face_id"]
-            face_box = None
-            if face_id is not None:
-                face_box = average_face_box(
-                    faces_tracked,
-                    face_id,
-                    block["start"],
-                    block["end"],
-                )
-            crop_preview = None
-            if face_box:
-                crop_preview = compute_vertical_crop(
-                    face_box,
-                    frame_w=1920,
-                    frame_h=1080,
-                )
-                all_crop_x.append(crop_preview["x"])
-            if idx < 10:
-                preview_blocks.append({
-                    "start": block["start"],
-                    "end": block["end"],
-                    "face_id": face_id,
-                    "crop_x": crop_preview["x"] if crop_preview else None,
-                })
-        if preview_blocks:
-            print("[FOCUS] 🔎 preview_blocks:")
-            for b in preview_blocks:
-                print(
-                    "[FOCUS] 🔎 "
-                    f"{b['start']:.3f}-{b['end']:.3f}s "
-                    f"face_id={b['face_id']} crop_x={b['crop_x']}"
-                )
-        if all_crop_x:
-            min_x = min(all_crop_x)
-            max_x = max(all_crop_x)
-            print(f"[FOCUS] 📏 crop_x range min={min_x} max={max_x}")
-            if min_x == max_x and len(focus_blocks) > 1:
-                print("[FOCUS] ⚠️ crop_x constant across blocks")
 
         temp_files = []
         virtual_cameras = {}
@@ -202,7 +151,7 @@ def render_clip(
         })
         print(f"[FOCUS] 🎥 faces_in_clip={visible_face_ids}")
         for face_id in visible_face_ids:
-            face_box = average_face_box(
+            face_box = stable_face_box(
                 faces_tracked,
                 face_id,
                 start,
@@ -217,7 +166,10 @@ def render_clip(
             )
             cam_path = media_root / "tmp" / f"{clip.id}_cam_{face_id}.mp4"
             cam_path.parent.mkdir(parents=True, exist_ok=True)
-            print(f"[FOCUS] 🎥 render camera face_id={face_id} crop_x={crop['x']}")
+            print(
+                "[FOCUS] 🎥 "
+                f"virtual_camera face_id={face_id} crop=({crop['x']},{crop['y']})"
+            )
             make_vertical_clip_with_focus(
                 video_path=video_path,
                 start=start,
@@ -234,7 +186,7 @@ def render_clip(
         if not virtual_cameras:
             center_cam = media_root / "tmp" / f"{clip.id}_cam_center.mp4"
             center_cam.parent.mkdir(parents=True, exist_ok=True)
-            print("[FOCUS] 🎥 render camera center")
+            print("[FOCUS] 🎥 virtual_camera center")
             make_vertical_clip_with_focus(
                 video_path=video_path,
                 start=start,
@@ -245,6 +197,8 @@ def render_clip(
                 crop=None,
                 output_path=center_cam,
             )
+        else:
+            print(f"[FOCUS] 🎥 virtual_cameras_ready={sorted(virtual_cameras)}")
 
         face_index: dict[str, list[tuple[float, dict]]] = {}
         for face in faces_tracked:
@@ -264,10 +218,9 @@ def render_clip(
         motion_threshold = 6.0
         confirm_offset = 0.0
         confirm_window = 0.25
-        silence_hold = 0.4
         min_motion_window = 0.2
         transcript_boost = 1.5
-        crop_deadzone = 16
+        switch_hysteresis = 0.2
 
         def _find_face_box(face_id, t):
             samples = face_index.get(face_id)
@@ -369,65 +322,76 @@ def render_clip(
                 return None
             return total / count
 
-        last_speech_end = start
-        current_silence = 0.0
-
-        def _build_segment_srt(seg_start, seg_end, tag):
-            segs = segments_for_clip(transcript_segments, seg_start, seg_end)
-            if not segs:
-                print(
-                    "[SUB] ⚠️ "
-                    f"no segments {seg_start:.3f}-{seg_end:.3f}s tag={tag}"
-                )
+        def _dominant_face_id():
+            counts = {}
+            for face in faces_tracked:
+                t = face.get("time", 0.0)
+                face_id = face.get("face_id")
+                if face_id is None or t < start or t > end:
+                    continue
+                counts[face_id] = counts.get(face_id, 0) + 1
+            if not counts:
                 return None
-            segs = fill_gaps(segs)
-            srt = to_srt(segs)
-            seg_path = subs_dir / f"{clip.id}_{tag}.srt"
-            seg_path.write_text(srt, encoding="utf-8")
-            first_start = segs[0]["start"] if segs else None
-            first_ms = int(first_start * 1000) if first_start is not None else None
-            print(
-                "[SUB] 🧭 "
-                f"segment={seg_start:.3f}-{seg_end:.3f}s "
-                f"first_ms={first_ms}"
-            )
-            return seg_path
-        # 4️⃣ RENDER DE CADA BLOCO
+            return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
+
+        dominant_face_id = _dominant_face_id()
+        if len(visible_face_ids) == 1:
+            base_blocks = [{
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "face_id": visible_face_ids[0],
+            }]
+        elif focus_blocks:
+            base_blocks = focus_blocks
+        else:
+            base_blocks = [{
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "face_id": dominant_face_id,
+            }]
+
+        speaker_timeline = []
         last_face_id = None
-        last_camera_id = None
-        for idx, block in enumerate(focus_blocks):
-            face_id = block["face_id"]
+        last_switch_time = start
+        for idx, block in enumerate(base_blocks):
             block_start = block["start"]
             block_end = block["end"]
-            block_duration = block_end - block_start
+            if block_end <= block_start:
+                continue
 
-            visible_face_ids = sorted({
+            block_visible = sorted({
                 face.get("face_id")
                 for face in faces_tracked
                 if block_start <= face.get("time", 0) <= block_end
                 and face.get("face_id") is not None
             })
-            visible_face_ids = [fid for fid in visible_face_ids if fid is not None]
+            block_visible = [fid for fid in block_visible if fid is not None]
             print(
                 "[FOCUS] 👁️ "
-                f"{block_start:.3f}-{block_end:.3f}s visible={visible_face_ids}"
+                f"{block_start:.3f}-{block_end:.3f}s visible={block_visible}"
             )
 
             has_speech = any(
                 seg["end"] > block_start and seg["start"] < block_end
                 for seg in transcript_segments
             )
-            selected_face_id = face_id
+            candidate_id = block.get("face_id")
+            if candidate_id not in block_visible:
+                candidate_id = None
+            if candidate_id is None and block_visible:
+                candidate_id = block_visible[0]
+
+            selected_face_id = candidate_id or last_face_id
             selection_reason = "timeline"
             motion_scores = {}
-            if use_motion_check and visible_face_ids:
+            if use_motion_check and block_visible:
                 score_start = block_start + confirm_offset
                 score_end = min(block_end, score_start + confirm_window)
                 window_duration = score_end - score_start
                 if window_duration >= min_motion_window:
-                    for candidate_id in visible_face_ids:
-                        motion_scores[candidate_id] = _mouth_motion_score(
-                            candidate_id,
+                    for candidate in block_visible:
+                        motion_scores[candidate] = _mouth_motion_score(
+                            candidate,
                             score_start,
                             score_end,
                         ) or 0.0
@@ -436,244 +400,133 @@ def render_clip(
                         for fid, score in motion_scores.items()
                         if score >= motion_threshold
                     }
-                    boosted_scores = dict(active_scores)
-                    if has_speech and face_id in boosted_scores:
-                        boosted_scores[face_id] = boosted_scores[face_id] + transcript_boost
+                    if has_speech and candidate_id in active_scores:
+                        active_scores[candidate_id] = (
+                            active_scores[candidate_id] + transcript_boost
+                        )
                     print(
-                        f"[FOCUS] 👥 visible={visible_face_ids} "
-                        f"scores={motion_scores} active={active_scores} boosted={boosted_scores}"
+                        f"[FOCUS] 👥 visible={block_visible} "
+                        f"scores={motion_scores} active={active_scores}"
                     )
-                    best_id = None
-                    best_score = None
-                    if boosted_scores:
-                        best_id = max(boosted_scores, key=boosted_scores.get)
-                        best_score = boosted_scores[best_id]
-
-                    current_focus_id = last_face_id or face_id
-                    current_motion = motion_scores.get(current_focus_id, 0.0)
-                    if current_focus_id is None:
-                        current_silence = 0.0
-                    elif current_motion >= motion_threshold:
-                        current_silence = 0.0
+                    if active_scores:
+                        if candidate_id in active_scores:
+                            selected_face_id = candidate_id
+                            selection_reason = "transcript_confirmed"
+                        elif last_face_id in active_scores:
+                            selected_face_id = last_face_id
+                            selection_reason = "hold_last_active"
+                        elif len(active_scores) == 1:
+                            selected_face_id = next(iter(active_scores))
+                            selection_reason = "motion_single"
+                        else:
+                            selected_face_id = last_face_id or candidate_id
+                            selection_reason = "motion_ambiguous"
                     else:
-                        current_silence += block_duration
-
-                    if best_id is None:
+                        selected_face_id = last_face_id or candidate_id
                         selection_reason = "no_active"
-                        selected_face_id = current_focus_id or face_id
-                    elif current_focus_id is None:
-                        selection_reason = "initial_motion"
-                        selected_face_id = best_id
-                    elif current_motion >= motion_threshold:
-                        selection_reason = "current_motion"
-                        selected_face_id = current_focus_id
-                    elif current_silence < silence_hold:
-                        selection_reason = "hold_silence"
-                        selected_face_id = current_focus_id
-                    else:
-                        selection_reason = "switch_motion"
-                        selected_face_id = best_id
-
-                    print(
-                        "[FOCUS] 🎯 "
-                        f"select={selected_face_id} reason={selection_reason} "
-                        f"best={best_id} best_score={best_score} silence={current_silence:.2f}"
-                    )
                 else:
-                    print(
-                        "[FOCUS] ⏳ "
-                        f"skip motion window={window_duration:.2f}s"
-                    )
-                    selected_face_id = last_face_id or face_id
+                    selected_face_id = last_face_id or candidate_id
                     selection_reason = "short_window"
 
-            if selected_face_id != face_id:
-                print(
-                    "[FOCUS] 🔁 "
-                    f"override {face_id}->{selected_face_id} "
-                    f"speech={has_speech} reason={selection_reason}"
-                )
-                face_id = selected_face_id
-            print(
-                "[FOCUS] ✅ "
-                f"selected face_id={face_id} reason={selection_reason} speech={has_speech}"
-            )
+            if not block_visible:
+                selected_face_id = last_face_id
+                selection_reason = "no_faces_hold"
 
-            face_box = None
-            if face_id is not None:
-                face_box = average_face_box(
-                    faces_tracked,
-                    face_id,
-                    block["start"],
-                    block["end"],
-                )
+            if selected_face_id is None and dominant_face_id is not None:
+                selected_face_id = dominant_face_id
+                selection_reason = "dominant_fallback"
 
-            crop = None
-            if face_box:
-                crop = compute_vertical_crop(
-                    face_box,
-                    frame_w=1920,
-                    frame_h=1080,
-                )
-            target_crop = crop
-
-            if face_id is None and last_face_id is not None and (block_start - last_speech_end) < silence_hold:
-                face_id = last_face_id
-                crop = last_crop
-            elif face_id is None:
-                crop = None
-            elif crop is None and last_crop is not None:
-                crop = last_crop
-            elif (
-                last_face_id is not None
-                and face_id == last_face_id
-                and last_crop is not None
-                and crop is not None
-                and target_crop is not None
-            ):
-                if (
-                    abs(target_crop["x"] - last_crop["x"]) < crop_deadzone
-                    and abs(target_crop["y"] - last_crop["y"]) < crop_deadzone
-                ):
-                    print(
-                        "[CROP] 🧊 "
-                        f"deadzone hold face_id={face_id} "
-                        f"target=({target_crop['x']},{target_crop['y']}) "
-                        f"prev=({last_crop['x']},{last_crop['y']})"
-                    )
-                    crop = last_crop
-
-            if crop:
-                print(
-                    "[RENDER] ✂️ "
-                    f"{block['start']:.3f}-{block['end']:.3f}s "
-                    f"crop x={crop['x']} y={crop['y']} w={crop['w']} h={crop['h']}"
-                )
-            else:
-                print(
-                    "[RENDER] ✂️ "
-                    f"{block['start']:.3f}-{block['end']:.3f}s center"
-                )
-
-            requested_switch = (
-                last_crop
-                and crop
-                and last_face_id is not None
-                and face_id is not None
-                and face_id != last_face_id
-            )
-            confirmed_switch = requested_switch
-            if crop and target_crop:
-                lock_state = "transition" if requested_switch else "locked"
-                print(
-                    "[CROP] 🎯 "
-                    f"face_id={face_id} "
-                    f"target_x={target_crop['x']} applied_x={crop['x']} "
-                    f"state={lock_state}"
-                )
-
-            if requested_switch and confirmed_switch and block_duration > min_transition:
-                pre_focus_end = min(block_start + confirm_window, block_end)
-                if last_crop and pre_focus_end > block_start:
-                    temp_out = media_root / "tmp" / f"{clip.id}_{idx}_pre.mp4"
-                    temp_out.parent.mkdir(parents=True, exist_ok=True)
-                    seg_srt = _build_segment_srt(block_start, pre_focus_end, f"{idx}_pre")
-                    print(
-                        "[RENDER] 🧩 "
-                        f"segment={idx}_pre {block_start:.3f}-{pre_focus_end:.3f}s "
-                        f"crop=({last_crop['x']},{last_crop['y']})"
-                    )
-                    make_vertical_clip_with_focus(
-                        video_path=video_path,
-                        start=block_start,
-                        end=pre_focus_end,
-                        subtitle_path=str(seg_srt) if seg_srt else None,
-                        media_root=media_root,
-                        clip_id=temp_out.stem,
-                        crop=last_crop,
-                        output_path=temp_out,
-                    )
-                    temp_files.append(temp_out)
-                    block_start = pre_focus_end
-
-                transition_dur = min(max_transition, max(min_transition, block_duration / 2))
-                if transition_dur > block_duration:
-                    transition_dur = block_duration
-                step_dur = transition_dur / transition_steps
-
-                for step in range(transition_steps):
-                    seg_start = block_start + step * step_dur
-                    seg_end = seg_start + step_dur
-                    alpha = (step + 1) / transition_steps
-                    step_crop = interpolate_crop(last_crop, crop, alpha)
-                    print(
-                        "[RENDER] 🎞️ "
-                        f"{seg_start:.3f}-{seg_end:.3f}s "
-                        f"crop x={step_crop['x']} y={step_crop['y']}"
-                    )
-                    print(
-                        "[RENDER] 🧩 "
-                        f"segment={idx}_t{step} {seg_start:.3f}-{seg_end:.3f}s "
-                        f"crop=({step_crop['x']},{step_crop['y']})"
-                    )
-
-                    temp_out = media_root / "tmp" / f"{clip.id}_{idx}_t{step}.mp4"
-                    temp_out.parent.mkdir(parents=True, exist_ok=True)
-                    seg_srt = _build_segment_srt(seg_start, seg_end, f"{idx}_t{step}")
-
-                    make_vertical_clip_with_focus(
-                        video_path=video_path,
-                        start=seg_start,
-                        end=seg_end,
-                        subtitle_path=str(seg_srt) if seg_srt else None,
-                        media_root=media_root,
-                        clip_id=temp_out.stem,
-                        crop=step_crop,
-                        output_path=temp_out,
-                    )
-                    temp_files.append(temp_out)
-
-                block_start += transition_dur
-
-            if face_id is None and last_face_id is not None and (block_start - last_speech_end) < silence_hold:
-                face_id = last_face_id
-
-            if block_end - block_start > 0.001:
-                temp_out = media_root / "tmp" / f"{clip.id}_{idx}.mp4"
-                temp_out.parent.mkdir(parents=True, exist_ok=True)
-                seg_srt = _build_segment_srt(block_start, block_end, f"{idx}")
-                if crop:
-                    print(
-                        "[RENDER] 🧩 "
-                        f"segment={idx} {block_start:.3f}-{block_end:.3f}s "
-                        f"crop=({crop['x']},{crop['y']})"
-                    )
+            if selected_face_id != last_face_id and last_face_id is not None:
+                if (block_start - last_switch_time) < switch_hysteresis:
+                    selected_face_id = last_face_id
+                    selection_reason = "hysteresis_hold"
                 else:
                     print(
-                        "[RENDER] 🧩 "
-                        f"segment={idx} {block_start:.3f}-{block_end:.3f}s center"
+                        "[FOCUS] 🎬 "
+                        f"camera_switch {last_face_id}->{selected_face_id} "
+                        f"t={block_start:.3f}s"
                     )
+                    last_switch_time = block_start
 
-                make_vertical_clip_with_focus(
-                    video_path=video_path,
-                    start=block_start,
-                    end=block_end,
-                    subtitle_path=str(seg_srt) if seg_srt else None,
-                    media_root=media_root,
-                    clip_id=temp_out.stem,
-                    crop=crop,
-                    output_path=temp_out,
-                )
+            if speaker_timeline and speaker_timeline[-1]["face_id"] == selected_face_id:
+                speaker_timeline[-1]["end"] = block_end
+            else:
+                speaker_timeline.append({
+                    "start": round(block_start, 3),
+                    "end": round(block_end, 3),
+                    "face_id": selected_face_id,
+                    "reason": selection_reason,
+                })
 
-                temp_files.append(temp_out)
+            print(
+                "[FOCUS] ✅ "
+                f"{block_start:.3f}-{block_end:.3f}s "
+                f"speaker={selected_face_id} reason={selection_reason}"
+            )
 
-            if face_id is not None:
-                last_face_id = face_id
-                last_camera_id = face_id
-                last_speech_end = block_end
+            if selected_face_id is not None:
+                last_face_id = selected_face_id
+
+        print("[FOCUS] 🧾 speaker_timeline:")
+        for entry in speaker_timeline:
+            print(
+                "[FOCUS] 🧾 "
+                f"{entry['start']:.3f}-{entry['end']:.3f}s "
+                f"face_id={entry['face_id']} reason={entry['reason']}"
+            )
+
+        for idx, block in enumerate(speaker_timeline):
+            block_start = block["start"]
+            block_end = block["end"]
+            if block_end <= block_start:
+                continue
+            face_id = block.get("face_id")
+            cam_path = None
+            if face_id in virtual_cameras:
+                cam_path = virtual_cameras[face_id]
+            elif center_cam:
+                cam_path = center_cam
+            elif virtual_cameras:
+                cam_path = next(iter(virtual_cameras.values()))
+
+            if cam_path is None:
+                continue
+
+            rel_start = block_start - start
+            rel_end = block_end - start
+            if rel_end <= rel_start:
+                continue
+
+            temp_out = media_root / "tmp" / f"{clip.id}_{idx}.mp4"
+            temp_out.parent.mkdir(parents=True, exist_ok=True)
+            print(
+                "[RENDER] 🧩 "
+                f"segment={idx} {block_start:.3f}-{block_end:.3f}s "
+                f"camera={face_id}"
+            )
+            trim_clip(
+                video_path=str(cam_path),
+                start=rel_start,
+                end=rel_end,
+                output_path=temp_out,
+            )
+            temp_files.append(temp_out)
 
         if cap:
             cap.release()
+
+        if not temp_files:
+            fallback_cam = center_cam or next(iter(virtual_cameras.values()), None)
+            if fallback_cam:
+                temp_out = media_root / "tmp" / f"{clip.id}_fallback.mp4"
+                temp_out.parent.mkdir(parents=True, exist_ok=True)
+                trim_clip(
+                    video_path=str(fallback_cam),
+                    start=0.0,
+                    end=end - start,
+                    output_path=temp_out,
+                )
+                temp_files.append(temp_out)
 
         # 5️⃣ CONCATENA
         concat_file = media_root / "tmp" / f"{clip.id}_concat.txt"
