@@ -599,7 +599,6 @@ def make_vertical_clip_with_focus(
     clip_id: str,
     crop: dict | None,
     output_path: Path,
-    crop_expr: str | None = None,
 ):
     sub_path = ""
     if subtitle_path:
@@ -634,10 +633,7 @@ def make_vertical_clip_with_focus(
         print(f"[SUB] ⚠️ missing subtitles path={subtitle_path}")
 
     vf_parts = ["setpts=PTS-STARTPTS"]
-    if crop_expr:
-        vf_parts.append(f"crop={crop_expr}")
-        vf_parts.append("scale=1080:1920")
-    elif crop:
+    if crop:
         vf_parts.append(f"crop={crop['w']}:{crop['h']}:{crop['x']}:{crop['y']}")
         vf_parts.append("scale=1080:1920")
     else:
