@@ -1,5 +1,8 @@
 # clips/tasks.py
+import hashlib
 import json
+import os
+import time
 import uuid
 from pathlib import Path
 from celery import shared_task, chord
@@ -25,6 +28,69 @@ from .tasks_clips import render_clip, finalize_job
 from .translator import translate_blueprint_to_cut_plan, generate_clip_sequence
 
 
+def _faces_cache_key(video_path: str, fps_sample: int) -> str | None:
+    try:
+        stat = os.stat(video_path)
+        base = f"{video_path}|{fps_sample}|{stat.st_mtime_ns}|{stat.st_size}"
+        return hashlib.sha1(base.encode("utf-8")).hexdigest()
+    except OSError:
+        return None
+
+
+def _load_faces_cache(media_root: Path, video_path: str, fps_sample: int):
+    try:
+        key = _faces_cache_key(video_path, fps_sample)
+        if not key:
+            return None
+        cache_path = media_root / "faces_cache" / f"{key}.json"
+        if not cache_path.exists():
+            return None
+        with open(cache_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        if payload.get("fps_sample") != fps_sample:
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+def _save_faces_cache(
+    media_root: Path,
+    video_path: str,
+    fps_sample: int,
+    faces: list,
+    faces_smooth: list,
+) -> None:
+    try:
+        key = _faces_cache_key(video_path, fps_sample)
+        if not key:
+            return
+        cache_dir = media_root / "faces_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_path = cache_dir / f"{key}.json"
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "fps_sample": fps_sample,
+                    "faces": faces,
+                    "faces_smooth": faces_smooth,
+                },
+                f,
+                ensure_ascii=False,
+            )
+    except Exception:
+        return None
+
+
+def _estimate_frames_processed(faces: list) -> int:
+    if not faces:
+        return 0
+    try:
+        return len({f.get("time") for f in faces if "time" in f})
+    except Exception:
+        return len(faces)
+
+
 @shared_task(bind=True)
 def prepare_face_focus(self, job_id: int):
     job = VideoJob.objects.get(id=job_id)
@@ -40,10 +106,41 @@ def prepare_face_focus(self, job_id: int):
         job.save(update_fields=["status"])
 
         fps_sample = 2
-        faces = detect_faces(job.original_path, fps_sample=fps_sample)
+        faces = []
+        faces_smooth = []
+        cache_payload = _load_faces_cache(media_root, job.original_path, fps_sample)
+        if cache_payload:
+            faces = cache_payload.get("faces", [])
+            faces_smooth = cache_payload.get("faces_smooth", [])
+            print(
+                "[FACES] ✅ cache hit "
+                f"fps_sample={fps_sample} frames={_estimate_frames_processed(faces)}"
+            )
 
-        # ✅ anti-tremida
-        faces_smooth = smooth_faces(faces, alpha=0.75)
+        if not faces:
+            t0 = time.time()
+            faces = detect_faces(job.original_path, fps_sample=fps_sample)
+            t1 = time.time()
+            print(
+                "[FACES] detect_faces "
+                f"fps_sample={fps_sample} "
+                f"frames={_estimate_frames_processed(faces)} "
+                f"t={t1 - t0:.2f}s"
+            )
+
+        if not faces_smooth:
+            t0 = time.time()
+            faces_smooth = smooth_faces(faces, alpha=0.75)
+            t1 = time.time()
+            print(
+                "[FACES] smooth_faces "
+                f"fps_sample={fps_sample} "
+                f"frames={_estimate_frames_processed(faces)} "
+                f"t={t1 - t0:.2f}s"
+            )
+
+        if faces and faces_smooth:
+            _save_faces_cache(media_root, job.original_path, fps_sample, faces, faces_smooth)
 
         # se não achou nada, não quebra o job inteiro (depende do seu produto)
         if not faces_smooth:
@@ -396,8 +493,41 @@ def generate_clip_from_blueprint(self, job_id: int, blueprint_path: str):
 
         update_job_step(job.id, "faces", "running")
         fps_sample = 1
-        faces = detect_faces(job.original_path, fps_sample=fps_sample)
-        faces_smooth = smooth_faces(faces, alpha=0.75)
+        faces = []
+        faces_smooth = []
+        cache_payload = _load_faces_cache(media_root, job.original_path, fps_sample)
+        if cache_payload:
+            faces = cache_payload.get("faces", [])
+            faces_smooth = cache_payload.get("faces_smooth", [])
+            print(
+                "[FACES] ✅ cache hit "
+                f"fps_sample={fps_sample} frames={_estimate_frames_processed(faces)}"
+            )
+
+        if not faces:
+            t0 = time.time()
+            faces = detect_faces(job.original_path, fps_sample=fps_sample)
+            t1 = time.time()
+            print(
+                "[FACES] detect_faces "
+                f"fps_sample={fps_sample} "
+                f"frames={_estimate_frames_processed(faces)} "
+                f"t={t1 - t0:.2f}s"
+            )
+
+        if not faces_smooth:
+            t0 = time.time()
+            faces_smooth = smooth_faces(faces, alpha=0.75)
+            t1 = time.time()
+            print(
+                "[FACES] smooth_faces "
+                f"fps_sample={fps_sample} "
+                f"frames={_estimate_frames_processed(faces)} "
+                f"t={t1 - t0:.2f}s"
+            )
+
+        if faces and faces_smooth:
+            _save_faces_cache(media_root, job.original_path, fps_sample, faces, faces_smooth)
         faces_tracked = track_faces(faces_smooth) if faces_smooth else []
 
         faces_tracked_path = clip_dir / "faces_tracked.json"
