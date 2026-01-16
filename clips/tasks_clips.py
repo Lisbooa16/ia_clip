@@ -21,6 +21,7 @@ def render_clip(
     start: float,
     end: float,
     score: float,
+    role: str | None = None,
 ):
     media_root = Path(settings.MEDIA_ROOT)
     clip_dir = media_root / "clips" / str(job_id)
@@ -31,7 +32,7 @@ def render_clip(
         start=start,
         end=end,
         score=score,
-        caption="",
+        caption=role or "",
         output_path="",
     )
 
@@ -47,11 +48,19 @@ def render_clip(
         srt_path.write_text(srt_text, encoding="utf-8")
 
         # 2️⃣ CARREGA FOCO E FACES
-        with open(clip_dir / "focus_timeline.json") as f:
+        focus_path = clip_dir / "focus_timeline.json"
+        if not focus_path.exists():
+            raise RuntimeError("focus_timeline.json não encontrado")
+
+        with open(focus_path) as f:
             focus_timeline = json.load(f)
 
-        with open(clip_dir / "faces_tracked.json") as f:
-            faces_tracked = json.load(f)
+        faces_path = clip_dir / "faces_tracked.json"
+        if faces_path.exists():
+            with open(faces_path) as f:
+                faces_tracked = json.load(f)
+        else:
+            faces_tracked = []
 
         # 3️⃣ SPLIT DO CLIP POR FOCO
         focus_blocks = focus_blocks_for_clip(
@@ -121,10 +130,9 @@ def render_clip(
         subprocess.check_call(cmd)
 
         clip.output_path = str(final_out)
-        clip.caption = ""
-        clip.save(update_fields=["output_path", "caption"])
+        clip.save(update_fields=["output_path"])
 
-    except Exception as e:
+    except Exception:
         clip.caption = "Erro ao renderizar clip"
         clip.save(update_fields=["caption"])
         raise

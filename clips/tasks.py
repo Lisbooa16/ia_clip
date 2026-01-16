@@ -5,18 +5,19 @@ from pathlib import Path
 from celery import shared_task, chord
 from django.conf import settings
 
-from .domain.speaker_focus import build_focus_timeline
+from .focus_strategy import build_focus_timeline
 from .media.crop_logic import build_crop_timeline
 from .media.face_detection import detect_faces
 from .media.face_smoothing import smooth_faces
 from .media.face_tracking import track_faces
 from .models import VideoJob
 from .services import (
-    detect_source, download_video,
-    transcribe_with_words, pick_viral_windows, transcribe_with_words_to_file
+    download_video,
+    transcribe_with_words_to_file,
 )
 from .services.clip_service import generate_clips
 from .tasks_clips import render_clip, finalize_job
+from .translator import translate_blueprint_to_cut_plan, generate_clip_sequence
 
 
 @shared_task(bind=True)
@@ -237,22 +238,18 @@ def pick_and_render(self, job_id: int):
     clip_dir = Path(settings.MEDIA_ROOT) / "clips" / str(job.id)
     faces_tracked_path = clip_dir / "faces_tracked.json"
 
-    if not faces_tracked_path.exists():
-        print("[PICK] ❌ faces_tracked.json não encontrado")
-        VideoJob.objects.filter(id=job.id).update(
-            status="error",
-            error="faces_tracked_not_found"
-        )
-        return
-
-    with open(faces_tracked_path, "r", encoding="utf-8") as f:
-        faces_tracked = json.load(f)
+    faces_tracked = []
+    if faces_tracked_path.exists():
+        with open(faces_tracked_path, "r", encoding="utf-8") as f:
+            faces_tracked = json.load(f)
+    else:
+        print("[PICK] ⚠️ faces_tracked.json não encontrado — usando foco central")
 
     print(f"[PICK] 👤 Faces tracked carregadas: {len(faces_tracked)}")
 
     focus_timeline = build_focus_timeline(
         faces_tracked=faces_tracked,
-        transcript=transcript
+        transcript=transcript,
     )
 
     focus_path = clip_dir / "focus_timeline.json"
@@ -289,6 +286,7 @@ def pick_and_render(self, job_id: int):
                 start=p["start"],
                 end=p["end"],
                 score=p["score"],
+                role=None,
             ).set(queue="clips_cpu")
         )
 
@@ -300,3 +298,89 @@ def pick_and_render(self, job_id: int):
     )
 
     print(f"[PICK] 🏁 pick_and_render finalizado com sucesso")
+
+
+@shared_task(bind=True)
+def generate_clip_from_blueprint(self, job_id: int, blueprint_path: str):
+    job = VideoJob.objects.get(id=job_id)
+    media_root = Path(settings.MEDIA_ROOT)
+
+    try:
+        job.status = "downloading"
+        job.save(update_fields=["status"])
+
+        video_path, title = download_video(job.url, media_root, job.source)
+        job.original_path = video_path
+        job.title = title or job.title
+        job.save(update_fields=["original_path", "title"])
+
+        job.status = "transcribing"
+        job.save(update_fields=["status"])
+
+        transcript_path = media_root / "transcripts" / f"{job.id}.json"
+        transcript_path.parent.mkdir(exist_ok=True)
+        transcribe_with_words_to_file(
+            job.original_path,
+            str(transcript_path),
+            language=job.language,
+            modelo=job,
+        )
+
+        job.transcript_path = str(transcript_path)
+        job.save(update_fields=["transcript_path"])
+
+        blueprint = json.loads(Path(blueprint_path).read_text(encoding="utf-8"))
+        blueprint_data = blueprint.get("blueprint", {})
+
+        transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
+
+        clip_dir = media_root / "clips" / str(job.id)
+        clip_dir.mkdir(parents=True, exist_ok=True)
+
+        fps_sample = 1
+        faces = detect_faces(job.original_path, fps_sample=fps_sample)
+        faces_smooth = smooth_faces(faces, alpha=0.75)
+        faces_tracked = track_faces(faces_smooth) if faces_smooth else []
+
+        faces_tracked_path = clip_dir / "faces_tracked.json"
+        with open(faces_tracked_path, "w", encoding="utf-8") as f:
+            json.dump(faces_tracked, f, ensure_ascii=False, indent=2)
+
+        focus_timeline = build_focus_timeline(
+            faces_tracked=faces_tracked,
+            transcript=transcript,
+        )
+        focus_path = clip_dir / "focus_timeline.json"
+        with open(focus_path, "w", encoding="utf-8") as f:
+            json.dump(focus_timeline, f, indent=2)
+
+        cut_plans = generate_clip_sequence(transcript, blueprint_data, job.source or "other")
+        if not cut_plans:
+            cut_plans = [translate_blueprint_to_cut_plan(transcript, blueprint_data)]
+
+        job.status = "clipping"
+        job.save(update_fields=["status"])
+
+        clip_tasks = []
+        for plan in cut_plans:
+            clip_tasks.append(
+                render_clip.s(
+                    job_id=job.id,
+                    video_path=job.original_path,
+                    transcript=transcript,
+                    start=plan["start"],
+                    end=plan["end"],
+                    score=0,
+                    role=plan.get("role"),
+                ).set(queue="clips_cpu")
+            )
+
+        chord(clip_tasks)(
+            finalize_job.s(job.id).set(queue="clips_cpu")
+        )
+
+    except Exception as e:
+        job.status = "error"
+        job.error = str(e)
+        job.save(update_fields=["status", "error"])
+        raise
