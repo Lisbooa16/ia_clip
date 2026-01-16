@@ -14,12 +14,6 @@ def average_face_box(faces_tracked, face_id, start, end):
     if not boxes:
         return None
 
-    print(
-        "[FOCUS] 📦 "
-        f"face_id={face_id} samples={len(boxes)} "
-        f"window={start:.3f}-{end:.3f}s"
-    )
-
     return {
         "x": int(sum(b["x"] for b in boxes) / len(boxes)),
         "y": int(sum(b["y"] for b in boxes) / len(boxes)),
@@ -71,17 +65,30 @@ def compute_vertical_crop(face_box, frame_w, frame_h):
     if desired_y in (0.0, frame_h - crop_h):
         clamped = True
 
+    last_x = getattr(compute_vertical_crop, "_last_x", None)
+    last_y = getattr(compute_vertical_crop, "_last_y", None)
+    if last_x is None:
+        smooth_x = desired_x
+    else:
+        smooth_x = last_x * 0.7 + desired_x * 0.3
+    if last_y is None:
+        smooth_y = desired_y
+    else:
+        smooth_y = last_y * 0.7 + desired_y * 0.3
+    compute_vertical_crop._last_x = smooth_x
+    compute_vertical_crop._last_y = smooth_y
+
     print(
         "[CROP] 🧭 "
         f"raw=({x:.1f},{y:.1f},{w:.1f},{h:.1f}) "
         f"exp=({exp_left:.1f},{exp_top:.1f},{exp_right-exp_left:.1f},{exp_bottom-exp_top:.1f}) "
-        f"crop=({desired_x:.1f},{desired_y:.1f},{crop_w},{crop_h}) "
+        f"crop=({smooth_x:.1f},{smooth_y:.1f},{crop_w},{crop_h}) "
         f"clamp={clamped} center_y={face_center_y:.1f}"
     )
 
     return {
-        "x": int(round(desired_x)),
-        "y": int(round(desired_y)),
+        "x": int(round(smooth_x)),
+        "y": int(round(smooth_y)),
         "w": crop_w,
         "h": crop_h,
     }
