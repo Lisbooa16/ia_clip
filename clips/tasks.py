@@ -20,29 +20,19 @@ from .tasks_clips import render_clip, finalize_job
 
 
 @shared_task(bind=True)
-def process_video_job(self, job_id: int):
+def prepare_face_focus(self, job_id: int):
     job = VideoJob.objects.get(id=job_id)
     media_root = Path(settings.MEDIA_ROOT)
+    clip_dir = media_root / "clips" / str(job.id)
+    clip_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        # DOWNLOAD (CPU)
-        job.status = "downloading"
-        job.save(update_fields=["status"])
-
-        video_path, title = download_video(job.url, media_root, job.source)
-        job.original_path = video_path
-        job.title = title
-        job.save(update_fields=["original_path", "title"])
-
-        clip_dir = media_root / "clips" / str(job.id)
-        clip_dir.mkdir(parents=True, exist_ok=True)
-
         # FACE DETECTION (CPU)
         job.status = "detecting_faces"
         job.save(update_fields=["status"])
 
-        fps_sample = 1
-        faces = detect_faces(video_path, fps_sample=fps_sample)
+        fps_sample = 2
+        faces = detect_faces(job.original_path, fps_sample=fps_sample)
 
         # ✅ anti-tremida
         faces_smooth = smooth_faces(faces, alpha=0.75)
@@ -106,14 +96,39 @@ def process_video_job(self, job_id: int):
         with open(crop_timeline_path, "w", encoding="utf-8") as f:
             json.dump(crop_timeline, f, ensure_ascii=False, indent=2)
 
-        # ✅ marca no job onde está o timeline (opcional mas MUITO útil)
-        job.status = "queued_transcription"
+    except Exception as e:
+        job.status = "error"
+        job.error = str(e)
+        job.save(update_fields=["status", "error"])
+        raise
+
+
+@shared_task(bind=True)
+def process_video_job(self, job_id: int):
+    job = VideoJob.objects.get(id=job_id)
+    media_root = Path(settings.MEDIA_ROOT)
+
+    try:
+        # DOWNLOAD (CPU)
+        job.status = "downloading"
         job.save(update_fields=["status"])
 
-        # DISPARA TRANSCRIÇÃO NA GPU (continua igual)
-        transcribe_video_gpu.apply_async(
-            args=[job.id],
-            queue="clips_gpu"
+        video_path, title = download_video(job.url, media_root, job.source)
+        job.original_path = video_path
+        job.title = title
+        job.save(update_fields=["original_path", "title"])
+
+        clip_dir = media_root / "clips" / str(job.id)
+        clip_dir.mkdir(parents=True, exist_ok=True)
+
+        job.status = "queued_processing"
+        job.save(update_fields=["status"])
+
+        chord([
+            transcribe_video_gpu.s(job.id).set(queue="clips_gpu"),
+            prepare_face_focus.s(job.id).set(queue="clips_cpu"),
+        ])(
+            kickoff_pick_and_render.s(job.id).set(queue="clips_cpu")
         )
 
     except Exception as e:
@@ -174,18 +189,22 @@ def transcribe_video_gpu(self, job_id):
 
     print(f"[JOB {job.id}] Transcript salvo em arquivo")
 
-    # 🚀 dispara a próxima etapa
-    pick_and_render.apply_async(
-        args=[job.id],
-        queue="clips_cpu"
-    )
-
-    print(f"[JOB {job.id}] pick_and_render disparado")
-
     # ✅ RETORNO EXPLÍCITO (CRÍTICO)
     return {
         "job_id": job.id,
         "segments": "written_to_file"
+    }
+
+
+@shared_task(bind=True)
+def kickoff_pick_and_render(self, _results, job_id: int):
+    pick_and_render.apply_async(
+        args=[job_id],
+        queue="clips_cpu"
+    )
+    return {
+        "job_id": job_id,
+        "stage": "pick_and_render_queued"
     }
 
 
@@ -237,29 +256,29 @@ def pick_and_render(self, job_id: int):
     clip_dir = Path(settings.MEDIA_ROOT) / "clips" / str(job.id)
     faces_tracked_path = clip_dir / "faces_tracked.json"
 
+    faces_tracked = []
     if not faces_tracked_path.exists():
-        print("[PICK] ❌ faces_tracked.json não encontrado")
-        VideoJob.objects.filter(id=job.id).update(
-            status="error",
-            error="faces_tracked_not_found"
-        )
-        return
-
-    with open(faces_tracked_path, "r", encoding="utf-8") as f:
-        faces_tracked = json.load(f)
+        print("[PICK] ⚠️ faces_tracked.json não encontrado — seguindo sem foco")
+    else:
+        with open(faces_tracked_path, "r", encoding="utf-8") as f:
+            faces_tracked = json.load(f)
 
     print(f"[PICK] 👤 Faces tracked carregadas: {len(faces_tracked)}")
 
-    focus_timeline = build_focus_timeline(
-        faces_tracked=faces_tracked,
-        transcript=transcript
-    )
+    focus_timeline = []
+    if faces_tracked:
+        focus_timeline = build_focus_timeline(
+            faces_tracked=faces_tracked,
+            transcript=transcript
+        )
 
-    focus_path = clip_dir / "focus_timeline.json"
-    with open(focus_path, "w", encoding="utf-8") as f:
-        json.dump(focus_timeline, f, indent=2)
-
-    print(f"[PICK] 🎯 focus_timeline gerado | blocos={len(focus_timeline)}")
+    if focus_timeline:
+        focus_path = clip_dir / "focus_timeline.json"
+        with open(focus_path, "w", encoding="utf-8") as f:
+            json.dump(focus_timeline, f, indent=2)
+        print(f"[PICK] 🎯 focus_timeline gerado | blocos={len(focus_timeline)}")
+    else:
+        print("[PICK] ⚠️ Sem foco por faces: renderizando com crop padrão")
 
     # picks
     print(f"[PICK] 🔍 Rodando pick_viral_windows...")
