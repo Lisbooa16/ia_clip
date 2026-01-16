@@ -213,6 +213,49 @@ li {
   color: var(--muted);
 }
 
+.similar-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.similar-card {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 16px;
+  background: #0b1220;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.similar-card img {
+  width: 100%;
+  border-radius: 10px;
+  object-fit: cover;
+}
+
+.similar-title {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+
+.similar-title a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.similar-meta {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.similar-why,
+.similar-take {
+  margin: 0 0 6px;
+  color: var(--muted);
+}
+
 .ideas {
   display: grid;
   gap: 16px;
@@ -238,6 +281,11 @@ li {
   font-weight: 600;
 }
 
+.focus {
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+
 .why {
   margin: 0;
   color: var(--muted);
@@ -245,4 +293,10 @@ li {
 
 .muted {
   color: var(--muted);
+}
+
+@media (max-width: 720px) {
+  .similar-card {
+    grid-template-columns: 1fr;
+  }
 }

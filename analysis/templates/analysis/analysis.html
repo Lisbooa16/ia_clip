@@ -82,22 +82,30 @@
 
                     <div class="story">
                         <div>
-                            <h3>O que aconteceu</h3>
-                            <p>{{ result.story_analysis.what_happened }}</p>
+                            <h3>Evento central</h3>
+                            <p>{{ result.story_insights.core_event }}</p>
                         </div>
                         <div>
-                            <h3>Por que prende atenção</h3>
-                            <p>{{ result.story_analysis.why_intriguing }}</p>
+                            <h3>Tensão narrativa</h3>
+                            <p>{{ result.story_insights.narrative_tension }}</p>
                         </div>
                         <div>
-                            <h3>Tensão central</h3>
-                            <p>{{ result.story_analysis.tension }}</p>
+                            <h3>Gatilho emocional</h3>
+                            <p>{{ result.story_insights.emotional_pull }}</p>
+                        </div>
+                        <div>
+                            <h3>Ângulo moral/social</h3>
+                            <p>{{ result.story_insights.moral_angle }}</p>
+                        </div>
+                        <div>
+                            <h3>Por que as pessoas compartilham</h3>
+                            <p>{{ result.story_insights.share_reason }}</p>
                         </div>
                     </div>
 
                     <div class="divider"></div>
 
-                    <h3>Gatilhos emocionais</h3>
+                    <h3>Emoções acionadas</h3>
                     <ul class="chips">
                         {% for signal in result.emotional_triggers %}
                             <li>{{ signal }}</li>
@@ -121,13 +129,41 @@
                 </div>
 
                 <div class="card">
-                    <h2>Ideias relacionadas</h2>
+                    <h2>Vídeos semelhantes reais</h2>
+                    {% if result.similar_videos %}
+                        <div class="similar-grid">
+                            {% for video in result.similar_videos %}
+                                <article class="similar-card">
+                                    {% if video.thumbnail %}
+                                        <img src="{{ video.thumbnail }}" alt="Thumbnail de {{ video.title }}">
+                                    {% endif %}
+                                    <div>
+                                        <p class="similar-title"><a href="{{ video.url }}" target="_blank">{{ video.title }}</a></p>
+                                        <p class="similar-meta">{{ video.platform|title }} • {{ video.views|default:"--" }} views</p>
+                                        <p class="similar-why">{{ video.why_similar }}</p>
+                                        {% if video.narrative_take %}
+                                            <p class="similar-take">{{ video.narrative_take }}</p>
+                                        {% endif %}
+                                    </div>
+                                </article>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="muted">Sem vídeos semelhantes suficientes para comparação.</p>
+                    {% endif %}
+                </div>
+            </section>
+
+            <section class="grid">
+                <div class="card">
+                    <h2>Ideias de novos vídeos</h2>
                     {% if result.related_videos %}
                         <div class="ideas">
                             {% for idea in result.related_videos %}
                                 <article>
-                                    <h3>{{ idea.type|title }}</h3>
+                                    <h3>{{ idea.role|title }}</h3>
                                     <p class="idea">{{ idea.idea }}</p>
+                                    <p class="focus">Foco: {{ idea.focus }}</p>
                                     <p class="why">{{ idea.why }}</p>
                                 </article>
                             {% endfor %}
@@ -136,9 +172,7 @@
                         <p class="muted">Sem sugestões específicas no momento.</p>
                     {% endif %}
                 </div>
-            </section>
 
-            <section class="grid">
                 <div class="card">
                     <h2>Estratégias de abertura</h2>
                     {% if result.opening_strategies %}
