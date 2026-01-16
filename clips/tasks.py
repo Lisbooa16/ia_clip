@@ -5,7 +5,7 @@ from pathlib import Path
 from celery import shared_task, chord
 from django.conf import settings
 
-from .domain.speaker_focus import build_focus_timeline
+from .focus_strategy import build_focus_timeline
 from .media.crop_logic import build_crop_timeline
 from .media.face_detection import detect_faces
 from .media.face_smoothing import smooth_faces
@@ -261,20 +261,22 @@ def pick_and_render(self, job_id: int):
     faces_tracked_path = clip_dir / "faces_tracked.json"
 
     faces_tracked = []
-    if not faces_tracked_path.exists():
-        print("[PICK] ⚠️ faces_tracked.json não encontrado — seguindo sem foco")
-    else:
+    if faces_tracked_path.exists():
         with open(faces_tracked_path, "r", encoding="utf-8") as f:
             faces_tracked = json.load(f)
+    else:
+        print("[PICK] ⚠️ faces_tracked.json não encontrado — usando foco central")
 
     print(f"[PICK] 👤 Faces tracked carregadas: {len(faces_tracked)}")
 
-    focus_timeline = []
-    if faces_tracked:
-        focus_timeline = build_focus_timeline(
-            faces_tracked=faces_tracked,
-            transcript=transcript
-        )
+    focus_timeline = build_focus_timeline(
+        faces_tracked=faces_tracked,
+        transcript=transcript,
+    )
+
+    focus_path = clip_dir / "focus_timeline.json"
+    with open(focus_path, "w", encoding="utf-8") as f:
+        json.dump(focus_timeline, f, indent=2)
 
     if focus_timeline:
         focus_path = clip_dir / "focus_timeline.json"

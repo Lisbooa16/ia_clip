@@ -46,22 +46,42 @@ def render_clip(
         srt_path = subs_dir / f"{clip.id}.srt"
         srt_path.write_text(srt_text, encoding="utf-8")
 
-        focus_timeline_path = clip_dir / "focus_timeline.json"
-        faces_tracked_path = clip_dir / "faces_tracked.json"
+        # 2️⃣ CARREGA FOCO E FACES
+        focus_path = clip_dir / "focus_timeline.json"
+        if not focus_path.exists():
+            raise RuntimeError("focus_timeline.json não encontrado")
 
-        if focus_timeline_path.exists() and faces_tracked_path.exists():
-            # 2️⃣ CARREGA FOCO E FACES
-            with open(focus_timeline_path) as f:
-                focus_timeline = json.load(f)
+        with open(focus_path) as f:
+            focus_timeline = json.load(f)
 
-            with open(faces_tracked_path) as f:
+        faces_path = clip_dir / "faces_tracked.json"
+        if faces_path.exists():
+            with open(faces_path) as f:
                 faces_tracked = json.load(f)
+        else:
+            faces_tracked = []
 
-            # 3️⃣ SPLIT DO CLIP POR FOCO
-            focus_blocks = focus_blocks_for_clip(
-                focus_timeline,
-                start,
-                end
+        # 3️⃣ SPLIT DO CLIP POR FOCO
+        focus_blocks = focus_blocks_for_clip(
+            focus_timeline,
+            start,
+            end
+        )
+
+        if not focus_blocks:
+            raise RuntimeError("Nenhum bloco de foco encontrado")
+
+        temp_files = []
+
+        # 4️⃣ RENDER DE CADA BLOCO
+        for idx, block in enumerate(focus_blocks):
+            face_id = block["face_id"]
+
+            face_box = average_face_box(
+                faces_tracked,
+                face_id,
+                block["start"],
+                block["end"],
             )
 
             if not focus_blocks:
