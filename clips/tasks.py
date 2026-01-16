@@ -6,7 +6,6 @@ import subprocess
 import time
 import uuid
 from pathlib import Path
-import cv2
 from celery import shared_task, chord
 from django.conf import settings
 
@@ -92,23 +91,6 @@ def _estimate_frames_processed(faces: list) -> int:
         return len({f.get("time") for f in faces if "time" in f})
     except Exception:
         return len(faces)
-
-
-def _get_video_frame_size(video_path: str, default: tuple[int, int] = (1920, 1080)) -> tuple[int, int]:
-    cap = None
-    try:
-        cap = cv2.VideoCapture(video_path)
-        if cap.isOpened():
-            frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
-            frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
-            if frame_w > 0 and frame_h > 0:
-                return frame_w, frame_h
-    except Exception:
-        pass
-    finally:
-        if cap is not None:
-            cap.release()
-    return default
 
 
 def _normalize_windows(windows: list[tuple[float, float]]) -> list[tuple[float, float]]:
@@ -482,7 +464,8 @@ def prepare_face_focus(self, job_id: int):
             )
 
         # 👇 CROP TIMELINE (CPU) — usa tracked (ainda melhor) ou smooth
-        frame_w, frame_h = _get_video_frame_size(job.original_path)
+        # Se você não souber frame_w/frame_h, dá pra ler via cv2 aqui.
+        frame_w, frame_h = 1920, 1080  # <-- ajuste se seu vídeo não for 1080p
 
         crop_timeline = build_crop_timeline(
             faces_tracked if faces_tracked else faces_smooth,
@@ -681,12 +664,9 @@ def pick_and_render(self, job_id: int):
 
         print(f"[PICK] 👤 Faces tracked carregadas: {len(faces_tracked)}")
 
-        frame_w, frame_h = _get_video_frame_size(job.original_path)
         focus_timeline = build_focus_timeline(
             faces_tracked=faces_tracked,
             transcript=transcript,
-            frame_w=frame_w,
-            frame_h=frame_h,
         )
 
         focus_path = clip_dir / "focus_timeline.json"
@@ -865,12 +845,9 @@ def generate_clip_from_blueprint(self, job_id: int, blueprint_path: str):
         with open(faces_tracked_path, "w", encoding="utf-8") as f:
             json.dump(faces_tracked, f, ensure_ascii=False, indent=2)
 
-        frame_w, frame_h = _get_video_frame_size(job.original_path)
         focus_timeline = build_focus_timeline(
             faces_tracked=faces_tracked,
             transcript=transcript,
-            frame_w=frame_w,
-            frame_h=frame_h,
         )
         focus_path = clip_dir / "focus_timeline.json"
         with open(focus_path, "w", encoding="utf-8") as f:
