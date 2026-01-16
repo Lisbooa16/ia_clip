@@ -9,6 +9,7 @@ from django.conf import settings
 
 from subtitles.subtitle_builder import segments_for_clip, fill_gaps, to_srt
 from .domain.render_focus import (
+    build_dynamic_crop_expr,
     compute_vertical_crop,
     find_focus_face,
     focus_blocks_for_clip,
@@ -17,7 +18,6 @@ from .domain.render_focus import (
 from .models import VideoClip, VideoJob, ensure_job_steps, update_job_step
 from .services import (
     make_vertical_clip_with_focus,
-    trim_clip,
     burn_subtitles,
     FFMPEG_BIN,
 )
@@ -142,7 +142,6 @@ def render_clip(
         print(f"[RENDER] 🎯 focus_blocks={len(focus_blocks)} clip_id={clip.id}")
 
         temp_files = []
-        virtual_cameras = {}
         visible_face_ids = sorted({
             face.get("face_id")
             for face in faces_tracked
@@ -150,55 +149,6 @@ def render_clip(
             and face.get("face_id") is not None
         })
         print(f"[FOCUS] 🎥 faces_in_clip={visible_face_ids}")
-        for face_id in visible_face_ids:
-            face_box = stable_face_box(
-                faces_tracked,
-                face_id,
-                start,
-                end,
-            )
-            if not face_box:
-                continue
-            crop = compute_vertical_crop(
-                face_box,
-                frame_w=1920,
-                frame_h=1080,
-            )
-            cam_path = media_root / "tmp" / f"{clip.id}_cam_{face_id}.mp4"
-            cam_path.parent.mkdir(parents=True, exist_ok=True)
-            print(
-                "[FOCUS] 🎥 "
-                f"virtual_camera face_id={face_id} crop=({crop['x']},{crop['y']})"
-            )
-            make_vertical_clip_with_focus(
-                video_path=video_path,
-                start=start,
-                end=end,
-                subtitle_path=None,
-                media_root=media_root,
-                clip_id=cam_path.stem,
-                crop=crop,
-                output_path=cam_path,
-            )
-            virtual_cameras[face_id] = cam_path
-
-        center_cam = None
-        if not virtual_cameras:
-            center_cam = media_root / "tmp" / f"{clip.id}_cam_center.mp4"
-            center_cam.parent.mkdir(parents=True, exist_ok=True)
-            print("[FOCUS] 🎥 virtual_camera center")
-            make_vertical_clip_with_focus(
-                video_path=video_path,
-                start=start,
-                end=end,
-                subtitle_path=None,
-                media_root=media_root,
-                clip_id=center_cam.stem,
-                crop=None,
-                output_path=center_cam,
-            )
-        else:
-            print(f"[FOCUS] 🎥 virtual_cameras_ready={sorted(virtual_cameras)}")
 
         face_index: dict[str, list[tuple[float, dict]]] = {}
         for face in faces_tracked:
@@ -209,12 +159,15 @@ def render_clip(
         for face_id in face_index:
             face_index[face_id].sort(key=lambda item: item[0])
 
-        use_motion_check = len(face_index) > 0
-        cap = cv2.VideoCapture(video_path) if use_motion_check else None
-        if cap and not cap.isOpened():
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
             cap.release()
             cap = None
-            use_motion_check = False
+
+        frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) if cap else 1920
+        frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) if cap else 1080
+
+        use_motion_check = len(face_index) > 0 and cap is not None
         motion_threshold = 6.0
         confirm_offset = 0.0
         confirm_window = 0.25
@@ -481,34 +434,45 @@ def render_clip(
             if block_end <= block_start:
                 continue
             face_id = block.get("face_id")
-            cam_path = None
-            if face_id in virtual_cameras:
-                cam_path = virtual_cameras[face_id]
-            elif center_cam:
-                cam_path = center_cam
-            elif virtual_cameras:
-                cam_path = next(iter(virtual_cameras.values()))
 
-            if cam_path is None:
-                continue
-
-            rel_start = block_start - start
-            rel_end = block_end - start
-            if rel_end <= rel_start:
-                continue
+            crop_expr = None
+            if face_id is not None:
+                crop_expr = build_dynamic_crop_expr(
+                    faces_tracked=faces_tracked,
+                    face_id=face_id,
+                    start=block_start,
+                    end=block_end,
+                    frame_w=frame_w,
+                    frame_h=frame_h,
+                )
+            crop = None
+            if crop_expr is None and face_id is not None:
+                face_box = stable_face_box(
+                    faces_tracked,
+                    face_id,
+                    block_start,
+                    block_end,
+                )
+                if face_box:
+                    crop = compute_vertical_crop(face_box, frame_w=frame_w, frame_h=frame_h)
 
             temp_out = media_root / "tmp" / f"{clip.id}_{idx}.mp4"
             temp_out.parent.mkdir(parents=True, exist_ok=True)
             print(
                 "[RENDER] 🧩 "
                 f"segment={idx} {block_start:.3f}-{block_end:.3f}s "
-                f"camera={face_id}"
+                f"camera={face_id} dynamic={crop_expr is not None}"
             )
-            trim_clip(
-                video_path=str(cam_path),
-                start=rel_start,
-                end=rel_end,
+            make_vertical_clip_with_focus(
+                video_path=video_path,
+                start=block_start,
+                end=block_end,
+                subtitle_path=None,
+                media_root=media_root,
+                clip_id=temp_out.stem,
+                crop=crop,
                 output_path=temp_out,
+                crop_expr=crop_expr,
             )
             temp_files.append(temp_out)
 
@@ -516,17 +480,20 @@ def render_clip(
             cap.release()
 
         if not temp_files:
-            fallback_cam = center_cam or next(iter(virtual_cameras.values()), None)
-            if fallback_cam:
-                temp_out = media_root / "tmp" / f"{clip.id}_fallback.mp4"
-                temp_out.parent.mkdir(parents=True, exist_ok=True)
-                trim_clip(
-                    video_path=str(fallback_cam),
-                    start=0.0,
-                    end=end - start,
-                    output_path=temp_out,
-                )
-                temp_files.append(temp_out)
+            temp_out = media_root / "tmp" / f"{clip.id}_fallback.mp4"
+            temp_out.parent.mkdir(parents=True, exist_ok=True)
+            make_vertical_clip_with_focus(
+                video_path=video_path,
+                start=start,
+                end=end,
+                subtitle_path=None,
+                media_root=media_root,
+                clip_id=temp_out.stem,
+                crop=None,
+                output_path=temp_out,
+                crop_expr=None,
+            )
+            temp_files.append(temp_out)
 
         # 5️⃣ CONCATENA
         concat_file = media_root / "tmp" / f"{clip.id}_concat.txt"
