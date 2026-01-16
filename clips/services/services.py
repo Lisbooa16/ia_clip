@@ -511,11 +511,25 @@ def make_vertical_clip_with_captions(
 
     sub_path = subtitle_path.replace("\\", "/").replace(":", "\\:")
 
+    subtitle_style = (
+        "FontName=Montserrat,"
+        "FontSize=64,"
+        "PrimaryColour=&H00FFFFFF,"
+        "OutlineColour=&H00000000,"
+        "BackColour=&H00000000,"
+        "Bold=1,"
+        "Outline=3,"
+        "Shadow=1,"
+        "Alignment=2,"
+        "MarginV=120,"
+        "WrapStyle=2"
+    )
     vf = (
         "scale=1080:1920:force_original_aspect_ratio=increase,"
         "crop=1080:1920,"
-        f"subtitles=filename='{sub_path}'"
+        f"subtitles=filename='{sub_path}':force_style='{subtitle_style}'"
     )
+    print(f"[SUB] ✅ style=shortform font=Montserrat size=64")
 
     cmd = [
         FFMPEG_BIN, "-y",
@@ -550,19 +564,33 @@ def make_vertical_clip_with_focus(
     output_path: Path,
 ):
     sub_path = subtitle_path.replace("\\", "/").replace(":", "\\:")
+    subtitle_style = (
+        "FontName=Montserrat,"
+        "FontSize=64,"
+        "PrimaryColour=&H00FFFFFF,"
+        "OutlineColour=&H00000000,"
+        "BackColour=&H00000000,"
+        "Bold=1,"
+        "Outline=3,"
+        "Shadow=1,"
+        "Alignment=2,"
+        "MarginV=120,"
+        "WrapStyle=2"
+    )
 
     if crop:
         vf = (
             f"crop={crop['w']}:{crop['h']}:{crop['x']}:{crop['y']},"
             "scale=1080:1920,"
-            f"subtitles=filename='{sub_path}'"
+            f"subtitles=filename='{sub_path}':force_style='{subtitle_style}'"
         )
     else:
         vf = (
             "scale=1080:1920:force_original_aspect_ratio=increase,"
             "crop=1080:1920,"
-            f"subtitles=filename='{sub_path}'"
+            f"subtitles=filename='{sub_path}':force_style='{subtitle_style}'"
         )
+    print(f"[SUB] ✅ style=shortform font=Montserrat size=64")
 
     cmd = [
         FFMPEG_BIN, "-y",
