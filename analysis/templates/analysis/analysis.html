@@ -1,238 +1,197 @@
-{% load humanize %}
+{% load static %}
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>Análise de Conteúdo</title>
-
-    <style>
-        * {
-            box-sizing: border-box;
-        }
-
-        body {
-            margin: 0;
-            font-family: Inter, Arial, sans-serif;
-            background: linear-gradient(180deg, #020617, #020617);
-            color: #e5e7eb;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 40px 24px;
-        }
-
-        h1 {
-            font-size: 28px;
-            margin-bottom: 6px;
-        }
-
-        .subtitle {
-            color: #94a3b8;
-            margin-bottom: 30px;
-        }
-
-        form {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 30px;
-        }
-
-        input[type="text"] {
-            flex: 1;
-            padding: 14px;
-            font-size: 16px;
-            border-radius: 8px;
-            border: 1px solid #1e293b;
-            background: #020617;
-            color: #e5e7eb;
-        }
-
-        input::placeholder {
-            color: #64748b;
-        }
-
-        button {
-            padding: 14px 20px;
-            font-size: 16px;
-            cursor: pointer;
-            background: #22c55e;
-            border: none;
-            border-radius: 8px;
-            color: #020617;
-            font-weight: 700;
-            transition: opacity .2s;
-        }
-
-        button:hover {
-            opacity: .85;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            background: #020617;
-            border-radius: 12px;
-            overflow: hidden;
-        }
-
-        th {
-            text-align: left;
-            padding: 14px;
-            font-size: 13px;
-            text-transform: uppercase;
-            letter-spacing: .05em;
-            background: #020617;
-            color: #94a3b8;
-            border-bottom: 1px solid #1e293b;
-        }
-
-        td {
-            padding: 14px;
-            border-bottom: 1px solid #1e293b;
-            vertical-align: middle;
-        }
-
-        tr:hover {
-            background: #020617;
-        }
-
-        a {
-            color: #38bdf8;
-            text-decoration: none;
-            font-weight: 500;
-        }
-
-        .views {
-            font-weight: 600;
-        }
-
-        .score {
-            font-weight: 700;
-            padding: 6px 10px;
-            border-radius: 999px;
-            font-size: 13px;
-            display: inline-block;
-        }
-
-        .score.high {
-            background: #22c55e;
-            color: #020617;
-        }
-
-        .score.mid {
-            background: #eab308;
-            color: #020617;
-        }
-
-        .score.low {
-            background: #ef4444;
-            color: #020617;
-        }
-
-        .bar {
-            width: 120px;
-            height: 8px;
-            background: #1e293b;
-            border-radius: 999px;
-            overflow: hidden;
-        }
-
-        .bar > div {
-            height: 100%;
-            background: #38bdf8;
-        }
-
-        .duration {
-            font-size: 13px;
-            color: #94a3b8;
-        }
-
-        .empty {
-            padding: 40px;
-            text-align: center;
-            color: #64748b;
-        }
-    </style>
+    <title>Radar Viral</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{% static 'analysis/style.css' %}">
 </head>
 <body>
+    <div class="page">
+        <header class="hero">
+            <div>
+                <p class="eyebrow">Análise narrativa e estratégia viral</p>
+                <h1>Radar Viral</h1>
+                <p class="subtitle">Cole a URL do vídeo e receba uma decisão editorial clara.</p>
+            </div>
+        </header>
 
-<div class="container">
+        <section class="card">
+            <form method="post" class="form">
+                {% csrf_token %}
+                <label for="url">URL do vídeo (YouTube, TikTok ou Instagram)</label>
+                <div class="form-row">
+                    <input
+                        id="url"
+                        type="url"
+                        name="url"
+                        placeholder="https://"
+                        value="{{ url }}"
+                        required
+                    >
+                    <button type="submit">Analisar</button>
+                </div>
+                {% if error %}
+                    <p class="error">{{ error }}</p>
+                {% endif %}
+            </form>
+        </section>
 
-    <h1>🔎 Análise de Conteúdo</h1>
-    <div class="subtitle">
-        Busque um tema e descubra os vídeos com maior potencial de corte
-    </div>
-
-    <form method="post">
-        {% csrf_token %}
-        <input
-            type="text"
-            name="query"
-            placeholder="Ex: stand up brasileiro, podcast IA, Neymar entrevista"
-            value="{{ query }}"
-            required
-        />
-        <button type="submit">Analisar</button>
-    </form>
-
-    {% if results %}
-    <table>
-        <thead>
-            <tr>
-                <th>Título</th>
-                <th>Views</th>
-                <th>Duração</th>
-                <th>Engajamento</th>
-                <th>Score</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for v in results %}
-            <tr>
-                <td>
-                    <a href="{{ v.url }}" target="_blank">
-                        {{ v.title }}
-                    </a>
-                </td>
-
-                <td class="views">
-                    {{ v.views|intcomma }}
-                </td>
-
-                <td class="duration">
-                    {{ v.duration }}s
-                </td>
-
-                <td>
-                    <div class="bar">
-                        <div style="width: {{ v.engagement|floatformat:2|cut:'0.' }}%;"></div>
+        {% if result %}
+            <section class="grid">
+                <div class="card summary">
+                    <h2>Resumo estratégico</h2>
+                    <div class="score">
+                        <div>
+                            <p class="label">Score viral</p>
+                            <p class="value">{{ result.score }}</p>
+                        </div>
+                        <span class="badge {{ result.score_label|lower }}">{{ result.score_label }}</span>
                     </div>
-                </td>
 
-                <td>
-                    {% if v.viral_score >= 6 %}
-                        <span class="score high">🔥 {{ v.viral_score }}</span>
-                    {% elif v.viral_score >= 3 %}
-                        <span class="score mid">⚡ {{ v.viral_score }}</span>
+                    <div class="meta">
+                        <p><strong>Plataforma:</strong> {{ result.platform|title }}</p>
+                        <p><strong>Duração:</strong> {{ result.metadata.duration|default:"--" }}s</p>
+                        <p><strong>Views:</strong> {{ result.metadata.views|default:"--" }}</p>
+                        <p><strong>Engajamento:</strong> {{ result.metadata.engagement|default:"--" }}</p>
+                    </div>
+
+                    <div class="divider"></div>
+
+                    <h3>Arquétipo narrativo</h3>
+                    <p>{{ result.narrative_archetype }}</p>
+
+                    <h3>Categoria viral</h3>
+                    <p>{{ result.viral_category }}</p>
+
+                    <h3>Motivação da audiência</h3>
+                    <ul>
+                        {% for item in result.audience_motivation %}
+                            <li>{{ item }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+
+                <div class="card">
+                    <h2>Leitura da história</h2>
+                    <p class="title">{{ result.metadata.title }}</p>
+                    <p class="description">{{ result.metadata.description }}</p>
+
+                    <div class="divider"></div>
+
+                    <div class="story">
+                        <div>
+                            <h3>Evento central</h3>
+                            <p>{{ result.story_insights.core_event }}</p>
+                        </div>
+                        <div>
+                            <h3>Tensão narrativa</h3>
+                            <p>{{ result.story_insights.narrative_tension }}</p>
+                        </div>
+                        <div>
+                            <h3>Gatilho emocional</h3>
+                            <p>{{ result.story_insights.emotional_pull }}</p>
+                        </div>
+                        <div>
+                            <h3>Ângulo moral/social</h3>
+                            <p>{{ result.story_insights.moral_angle }}</p>
+                        </div>
+                        <div>
+                            <h3>Por que as pessoas compartilham</h3>
+                            <p>{{ result.story_insights.share_reason }}</p>
+                        </div>
+                    </div>
+
+                    <div class="divider"></div>
+
+                    <h3>Emoções acionadas</h3>
+                    <ul class="chips">
+                        {% for signal in result.emotional_triggers %}
+                            <li>{{ signal }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </section>
+
+            <section class="card decision">
+                <h2>O que postar a seguir</h2>
+                {% if result.editorial_decisions %}
+                    <div class="decision-grid">
+                        {% for decision in result.editorial_decisions %}
+                            <article class="decision-card{% if decision.priority == 1 %} primary{% endif %}">
+                                <div class="decision-header">
+                                    <span class="decision-rank">Prioridade {{ decision.priority }}</span>
+                                    <span class="decision-type">{{ decision.performance_type }}</span>
+                                    <span class="decision-risk">Risco {{ decision.risk_level }}</span>
+                                </div>
+                                <h3>{{ decision.idea }}</h3>
+                                <p class="decision-role">Papel: {{ decision.role }}</p>
+                                <p class="decision-trigger">Gatilho psicológico: {{ decision.trigger }}</p>
+                                <div class="blueprint">
+                                    <h4>Blueprint</h4>
+                                    <ul>
+                                        <li><strong>Abertura:</strong> {{ decision.blueprint.opening }}</li>
+                                        <li><strong>Setup:</strong> {{ decision.blueprint.setup }}</li>
+                                        <li><strong>Contexto:</strong> {{ decision.blueprint.context }}</li>
+                                        <li><strong>Tensão:</strong> {{ decision.blueprint.tension }}</li>
+                                        <li><strong>Revelação:</strong> {{ decision.blueprint.reveal }}</li>
+                                        <li><strong>Final:</strong> {{ decision.ending }}</li>
+                                    </ul>
+                                </div>
+                                <p class="decision-why">{{ decision.rationale }}</p>
+                                {% if decision.priority == 1 %}
+                                    <div class="next-step">
+                                        <h4>Se performar bem</h4>
+                                        <p>{{ decision.next_if_success }}</p>
+                                    </div>
+                                    <div class="opening">
+                                        <h4>Estratégias de abertura</h4>
+                                        <ul>
+                                            {% for strategy in decision.opening_strategies %}
+                                                <li>{{ strategy }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+                                {% endif %}
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="muted">Sem decisões fortes para recomendar neste momento.</p>
+                {% endif %}
+                {% if result.discarded_reason %}
+                    <p class="decision-note">{{ result.discarded_reason }}</p>
+                {% endif %}
+            </section>
+
+            <section class="grid">
+                <div class="card">
+                    <h2>Vídeos semelhantes reais</h2>
+                    {% if result.similar_videos %}
+                        <div class="similar-grid">
+                            {% for video in result.similar_videos %}
+                                <article class="similar-card">
+                                    {% if video.thumbnail %}
+                                        <img src="{{ video.thumbnail }}" alt="Thumbnail de {{ video.title }}">
+                                    {% endif %}
+                                    <div>
+                                        <p class="similar-title"><a href="{{ video.url }}" target="_blank">{{ video.title }}</a></p>
+                                        <p class="similar-meta">{{ video.platform|title }} • {{ video.views|default:"--" }} views</p>
+                                        <p class="similar-why">{{ video.why_similar }}</p>
+                                        {% if video.narrative_take %}
+                                            <p class="similar-take">{{ video.narrative_take }}</p>
+                                        {% endif %}
+                                    </div>
+                                </article>
+                            {% endfor %}
+                        </div>
                     {% else %}
-                        <span class="score low">❄ {{ v.viral_score }}</span>
+                        <p class="muted">Sem vídeos semelhantes suficientes para comparação.</p>
                     {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-        {% if query %}
-        <div class="empty">
-            Nenhum resultado encontrado para "{{ query }}"
-        </div>
+                </div>
+            </section>
         {% endif %}
-    {% endif %}
-
-</div>
-
+    </div>
 </body>
 </html>
