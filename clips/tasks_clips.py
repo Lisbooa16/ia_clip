@@ -65,6 +65,8 @@ def render_clip(
         else:
             faces_tracked = []
 
+        transcript_segments = transcript.get("segments", [])
+
         # 3️⃣ SPLIT DO CLIP POR FOCO
         focus_blocks = focus_blocks_for_clip(
             focus_timeline,
@@ -85,6 +87,62 @@ def render_clip(
             clip.caption = caption
             clip.save(update_fields=["output_path", "caption"])
             return str(clip.id)
+
+        def _build_focus_windows():
+            windows = []
+            cursor = start
+            for seg in transcript_segments:
+                seg_start = float(seg["start"])
+                seg_end = float(seg["end"])
+                if seg_end <= start:
+                    continue
+                if seg_start >= end:
+                    break
+                block_start = max(seg_start, start)
+                block_end = min(seg_end, end)
+                if block_start > cursor:
+                    windows.append({
+                        "start": round(cursor, 3),
+                        "end": round(block_start, 3),
+                        "face_id": find_focus_face(focus_timeline, cursor, block_start),
+                    })
+                windows.append({
+                    "start": round(block_start, 3),
+                    "end": round(block_end, 3),
+                    "face_id": find_focus_face(focus_timeline, block_start, block_end),
+                })
+                cursor = block_end
+            if cursor < end:
+                windows.append({
+                    "start": round(cursor, 3),
+                    "end": round(end, 3),
+                    "face_id": find_focus_face(focus_timeline, cursor, end),
+                })
+
+            min_block = 0.2
+            merged = []
+            for block in windows:
+                duration = block["end"] - block["start"]
+                if merged:
+                    prev = merged[-1]
+                    if block["face_id"] == prev["face_id"]:
+                        prev["end"] = max(prev["end"], block["end"])
+                        continue
+                    if duration < min_block:
+                        prev["end"] = max(prev["end"], block["end"])
+                        continue
+                if duration < min_block and merged:
+                    merged[-1]["end"] = max(merged[-1]["end"], block["end"])
+                    continue
+                merged.append(block)
+            return merged
+
+        if len(focus_blocks) <= 1 and transcript_segments and faces_tracked:
+            focus_blocks = _build_focus_windows() or focus_blocks
+            print(
+                "[RENDER] 🧭 "
+                f"rewindow blocks={len(focus_blocks)} clip_id={clip.id}"
+            )
 
         print(f"[RENDER] 🎯 focus_blocks={len(focus_blocks)} clip_id={clip.id}")
         preview_blocks = []
@@ -269,7 +327,6 @@ def render_clip(
                 return None
             return total / count
 
-        transcript_segments = transcript.get("segments", [])
         last_speech_end = start
         current_silence = 0.0
 
