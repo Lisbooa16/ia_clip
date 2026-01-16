@@ -1,5 +1,6 @@
 # clips/tasks_clips.py
 import json
+import uuid
 import bisect
 import cv2
 import numpy as np
@@ -10,13 +11,7 @@ from django.conf import settings
 from subtitles.subtitle_builder import segments_for_clip, fill_gaps, to_srt
 from .domain.render_focus import average_face_box, compute_vertical_crop, find_focus_face, focus_blocks_for_clip
 from .models import VideoClip, VideoJob, ensure_job_steps, update_job_step
-from .services import (
-    make_vertical_clip_with_captions,
-    make_vertical_clip_with_focus,
-    trim_clip,
-    burn_subtitles,
-    FFMPEG_BIN,
-)
+from .services import make_vertical_clip_with_captions, make_vertical_clip_with_focus, FFMPEG_BIN
 import subprocess
 
 
@@ -94,58 +89,21 @@ def render_clip(
         print(f"[RENDER] 🎯 focus_blocks={len(focus_blocks)} clip_id={clip.id}")
 
         temp_files = []
-        virtual_cameras = {}
-        visible_face_ids = sorted({
-            face.get("face_id")
-            for face in faces_tracked
-            if start <= face.get("time", 0) <= end
-            and face.get("face_id") is not None
-        })
-        print(f"[FOCUS] 🎥 faces_in_clip={visible_face_ids}")
-        for face_id in visible_face_ids:
-            face_box = average_face_box(
-                faces_tracked,
-                face_id,
-                start,
-                end,
-            )
-            if not face_box:
-                continue
-            crop = compute_vertical_crop(
-                face_box,
-                frame_w=1920,
-                frame_h=1080,
-            )
-            cam_path = media_root / "tmp" / f"{clip.id}_cam_{face_id}.mp4"
-            cam_path.parent.mkdir(parents=True, exist_ok=True)
-            print(f"[FOCUS] 🎥 render camera face_id={face_id} crop_x={crop['x']}")
-            make_vertical_clip_with_focus(
-                video_path=video_path,
-                start=start,
-                end=end,
-                subtitle_path=None,
-                media_root=media_root,
-                clip_id=cam_path.stem,
-                crop=crop,
-                output_path=cam_path,
-            )
-            virtual_cameras[face_id] = cam_path
+        last_crop = None
+        transition_steps = 4
+        min_transition = 0.2
+        max_transition = 0.4
 
-        center_cam = None
-        if not virtual_cameras:
-            center_cam = media_root / "tmp" / f"{clip.id}_cam_center.mp4"
-            center_cam.parent.mkdir(parents=True, exist_ok=True)
-            print("[FOCUS] 🎥 render camera center")
-            make_vertical_clip_with_focus(
-                video_path=video_path,
-                start=start,
-                end=end,
-                subtitle_path=None,
-                media_root=media_root,
-                clip_id=center_cam.stem,
-                crop=None,
-                output_path=center_cam,
-            )
+        def interpolate_crop(a, b, alpha):
+            if not a or not b:
+                return b or a
+            eased = alpha * alpha * (3 - 2 * alpha)
+            return {
+                "x": int(round(a["x"] + (b["x"] - a["x"]) * eased)),
+                "y": int(round(a["y"] + (b["y"] - a["y"]) * eased)),
+                "w": a["w"],
+                "h": a["h"],
+            }
 
         face_index: dict[str, list[tuple[float, dict]]] = {}
         for face in faces_tracked:
@@ -274,7 +232,6 @@ def render_clip(
         current_silence = 0.0
         # 4️⃣ RENDER DE CADA BLOCO
         last_face_id = None
-        last_camera_id = None
         for idx, block in enumerate(focus_blocks):
             face_id = block["face_id"]
             block_start = block["start"]
@@ -285,7 +242,6 @@ def render_clip(
                 face.get("face_id")
                 for face in faces_tracked
                 if block_start <= face.get("time", 0) <= block_end
-                and face.get("face_id") is not None
             })
             visible_face_ids = [fid for fid in visible_face_ids if fid is not None]
             print(
@@ -478,8 +434,9 @@ def render_clip(
 
                 block_start += transition_dur
 
-            if face_id is None and last_face_id is not None and (block_start - last_speech_end) < silence_hold:
+            if not confirmed_switch and requested_switch:
                 face_id = last_face_id
+                crop = last_crop
 
             if block_end - block_start > 0.001:
                 temp_out = media_root / "tmp" / f"{clip.id}_{idx}.mp4"
@@ -498,9 +455,10 @@ def render_clip(
 
                 temp_files.append(temp_out)
 
+            if crop is not None:
+                last_crop = crop
             if face_id is not None:
                 last_face_id = face_id
-                last_camera_id = face_id
                 last_speech_end = block_end
 
         if cap:
@@ -514,7 +472,6 @@ def render_clip(
 
         final_out = media_root / "videos" / "clips" / f"{clip.id}.mp4"
         final_out.parent.mkdir(parents=True, exist_ok=True)
-        concat_out = media_root / "tmp" / f"{clip.id}_concat.mp4"
 
         cmd = [
             FFMPEG_BIN, "-y",
@@ -532,7 +489,7 @@ def render_clip(
             "-b:a", "128k",
             "-af", "aresample=async=1:first_pts=0",
             "-movflags", "+faststart",
-            str(concat_out),
+            str(final_out),
         ]
         print("[RENDER] 🎞️ concat_fps=30 res=1080x1920 pix_fmt=yuv420p")
         try:
@@ -543,16 +500,6 @@ def render_clip(
             fallback_cmd[fallback_cmd.index("-crf") + 1] = "23"
             print("[RENDER] ⚠️ concat fallback retry")
             subprocess.check_call(fallback_cmd)
-
-        if srt_path.exists():
-            print("[SUB] 🎬 burn subtitles on final output")
-            burn_subtitles(
-                video_path=str(concat_out),
-                subtitle_path=str(srt_path),
-                output_path=final_out,
-            )
-        else:
-            concat_out.replace(final_out)
 
         clip.output_path = str(final_out)
         clip.save(update_fields=["output_path"])
