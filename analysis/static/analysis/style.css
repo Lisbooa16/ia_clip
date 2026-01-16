@@ -176,6 +176,16 @@ button:hover {
   color: var(--muted);
 }
 
+.story {
+  display: grid;
+  gap: 12px;
+}
+
+.story p {
+  color: var(--muted);
+  margin: 6px 0 0;
+}
+
 ul {
   margin: 0;
   padding-left: 18px;
@@ -203,10 +213,34 @@ li {
   color: var(--muted);
 }
 
-.two-col {
+.ideas {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 16px;
+}
+
+.ideas article {
+  background: #0b1220;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.ideas h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.idea {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.why {
+  margin: 0;
+  color: var(--muted);
 }
 
 .muted {
