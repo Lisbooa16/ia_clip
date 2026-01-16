@@ -28,10 +28,10 @@ def compute_vertical_crop(face_box, frame_w, frame_h):
     w = float(face_box["w"])
     h = float(face_box["h"])
 
-    left_pad = 0.25 * w
-    right_pad = 0.25 * w
-    top_pad = 0.35 * h
-    bottom_pad = 0.25 * h
+    left_pad = 0.18 * w
+    right_pad = 0.18 * w
+    top_pad = 0.5 * h
+    bottom_pad = 0.2 * h
 
     exp_left = max(0.0, x - left_pad)
     exp_top = max(0.0, y - top_pad)
@@ -45,6 +45,7 @@ def compute_vertical_crop(face_box, frame_w, frame_h):
     crop_h = frame_h
 
     desired_x = face_center_x - crop_w / 2
+    desired_y = face_center_y - crop_h / 2
     min_x = exp_right - crop_w
     max_x = exp_left
     if min_x > max_x:
@@ -58,27 +59,36 @@ def compute_vertical_crop(face_box, frame_w, frame_h):
         clamped = True
 
     desired_x = max(0.0, min(desired_x, frame_w - crop_w))
+    desired_y = max(0.0, min(desired_y, frame_h - crop_h))
     if desired_x in (0.0, frame_w - crop_w):
+        clamped = True
+    if desired_y in (0.0, frame_h - crop_h):
         clamped = True
 
     last_x = getattr(compute_vertical_crop, "_last_x", None)
+    last_y = getattr(compute_vertical_crop, "_last_y", None)
     if last_x is None:
         smooth_x = desired_x
     else:
         smooth_x = last_x * 0.7 + desired_x * 0.3
+    if last_y is None:
+        smooth_y = desired_y
+    else:
+        smooth_y = last_y * 0.7 + desired_y * 0.3
     compute_vertical_crop._last_x = smooth_x
+    compute_vertical_crop._last_y = smooth_y
 
     print(
         "[CROP] 🧭 "
         f"raw=({x:.1f},{y:.1f},{w:.1f},{h:.1f}) "
         f"exp=({exp_left:.1f},{exp_top:.1f},{exp_right-exp_left:.1f},{exp_bottom-exp_top:.1f}) "
-        f"crop=({smooth_x:.1f},0.0,{crop_w},{crop_h}) "
+        f"crop=({smooth_x:.1f},{smooth_y:.1f},{crop_w},{crop_h}) "
         f"clamp={clamped} center_y={face_center_y:.1f}"
     )
 
     return {
         "x": int(round(smooth_x)),
-        "y": 0,
+        "y": int(round(smooth_y)),
         "w": crop_w,
         "h": crop_h,
     }
