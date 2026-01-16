@@ -13,7 +13,7 @@
             <div>
                 <p class="eyebrow">Análise narrativa e estratégia viral</p>
                 <h1>Radar Viral</h1>
-                <p class="subtitle">Cole a URL do vídeo e receba um plano editorial contextualizado.</p>
+                <p class="subtitle">Cole a URL do vídeo e receba uma decisão editorial clara.</p>
             </div>
         </header>
 
@@ -114,20 +114,58 @@
                 </div>
             </section>
 
-            <section class="grid">
-                <div class="card">
-                    <h2>Cluster de conteúdo</h2>
-                    {% if result.content_cluster %}
-                        <ul>
-                            {% for idea in result.content_cluster %}
-                                <li>{{ idea }}</li>
-                            {% endfor %}
-                        </ul>
-                    {% else %}
-                        <p class="muted">Informação insuficiente para sugerir um cluster amplo.</p>
-                    {% endif %}
-                </div>
+            <section class="card decision">
+                <h2>O que postar a seguir</h2>
+                {% if result.editorial_decisions %}
+                    <div class="decision-grid">
+                        {% for decision in result.editorial_decisions %}
+                            <article class="decision-card{% if decision.priority == 1 %} primary{% endif %}">
+                                <div class="decision-header">
+                                    <span class="decision-rank">Prioridade {{ decision.priority }}</span>
+                                    <span class="decision-type">{{ decision.performance_type }}</span>
+                                    <span class="decision-risk">Risco {{ decision.risk_level }}</span>
+                                </div>
+                                <h3>{{ decision.idea }}</h3>
+                                <p class="decision-role">Papel: {{ decision.role }}</p>
+                                <p class="decision-trigger">Gatilho psicológico: {{ decision.trigger }}</p>
+                                <div class="blueprint">
+                                    <h4>Blueprint</h4>
+                                    <ul>
+                                        <li><strong>Abertura:</strong> {{ decision.blueprint.opening }}</li>
+                                        <li><strong>Setup:</strong> {{ decision.blueprint.setup }}</li>
+                                        <li><strong>Contexto:</strong> {{ decision.blueprint.context }}</li>
+                                        <li><strong>Tensão:</strong> {{ decision.blueprint.tension }}</li>
+                                        <li><strong>Revelação:</strong> {{ decision.blueprint.reveal }}</li>
+                                        <li><strong>Final:</strong> {{ decision.ending }}</li>
+                                    </ul>
+                                </div>
+                                <p class="decision-why">{{ decision.rationale }}</p>
+                                {% if decision.priority == 1 %}
+                                    <div class="next-step">
+                                        <h4>Se performar bem</h4>
+                                        <p>{{ decision.next_if_success }}</p>
+                                    </div>
+                                    <div class="opening">
+                                        <h4>Estratégias de abertura</h4>
+                                        <ul>
+                                            {% for strategy in decision.opening_strategies %}
+                                                <li>{{ strategy }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+                                {% endif %}
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="muted">Sem decisões fortes para recomendar neste momento.</p>
+                {% endif %}
+                {% if result.discarded_reason %}
+                    <p class="decision-note">{{ result.discarded_reason }}</p>
+                {% endif %}
+            </section>
 
+            <section class="grid">
                 <div class="card">
                     <h2>Vídeos semelhantes reais</h2>
                     {% if result.similar_videos %}
@@ -150,39 +188,6 @@
                         </div>
                     {% else %}
                         <p class="muted">Sem vídeos semelhantes suficientes para comparação.</p>
-                    {% endif %}
-                </div>
-            </section>
-
-            <section class="grid">
-                <div class="card">
-                    <h2>Ideias de novos vídeos</h2>
-                    {% if result.related_videos %}
-                        <div class="ideas">
-                            {% for idea in result.related_videos %}
-                                <article>
-                                    <h3>{{ idea.role|title }}</h3>
-                                    <p class="idea">{{ idea.idea }}</p>
-                                    <p class="focus">Foco: {{ idea.focus }}</p>
-                                    <p class="why">{{ idea.why }}</p>
-                                </article>
-                            {% endfor %}
-                        </div>
-                    {% else %}
-                        <p class="muted">Sem sugestões específicas no momento.</p>
-                    {% endif %}
-                </div>
-
-                <div class="card">
-                    <h2>Estratégias de abertura</h2>
-                    {% if result.opening_strategies %}
-                        <ul>
-                            {% for strategy in result.opening_strategies %}
-                                <li>{{ strategy }}</li>
-                            {% endfor %}
-                        </ul>
-                    {% else %}
-                        <p class="muted">Sem estratégia sugerida por falta de contexto.</p>
                     {% endif %}
                 </div>
             </section>

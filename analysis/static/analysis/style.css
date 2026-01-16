@@ -186,6 +186,69 @@ button:hover {
   margin: 6px 0 0;
 }
 
+.decision {
+  margin-top: 20px;
+}
+
+.decision-grid {
+  display: grid;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.decision-card {
+  background: #0b1220;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+}
+
+.decision-card.primary {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.4);
+}
+
+.decision-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.decision-header span {
+  background: #0f172a;
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+
+.decision-role,
+.decision-trigger,
+.decision-why {
+  color: var(--muted);
+}
+
+.blueprint ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.next-step,
+.opening {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.decision-note {
+  margin-top: 12px;
+  color: var(--muted);
+}
+
 ul {
   margin: 0;
   padding-left: 18px;
@@ -253,41 +316,6 @@ li {
 .similar-why,
 .similar-take {
   margin: 0 0 6px;
-  color: var(--muted);
-}
-
-.ideas {
-  display: grid;
-  gap: 16px;
-}
-
-.ideas article {
-  background: #0b1220;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px;
-}
-
-.ideas h3 {
-  margin: 0 0 8px;
-  font-size: 14px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-}
-
-.idea {
-  margin: 0 0 8px;
-  font-weight: 600;
-}
-
-.focus {
-  margin: 0 0 8px;
-  color: var(--muted);
-}
-
-.why {
-  margin: 0;
   color: var(--muted);
 }
 

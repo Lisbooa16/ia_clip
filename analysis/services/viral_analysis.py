@@ -92,10 +92,9 @@ class ViralAnalysisResult:
     audience_motivation: list[str]
     emotional_triggers: list[str]
     story_insights: dict[str, str]
-    content_cluster: list[str]
-    related_videos: list[dict[str, str]]
     similar_videos: list[dict[str, Any]]
-    opening_strategies: list[str]
+    editorial_decisions: list[dict[str, Any]]
+    discarded_reason: str | None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -108,10 +107,9 @@ class ViralAnalysisResult:
             "audience_motivation": self.audience_motivation,
             "emotional_triggers": self.emotional_triggers,
             "story_insights": self.story_insights,
-            "content_cluster": self.content_cluster,
-            "related_videos": self.related_videos,
             "similar_videos": self.similar_videos,
-            "opening_strategies": self.opening_strategies,
+            "editorial_decisions": self.editorial_decisions,
+            "discarded_reason": self.discarded_reason,
         }
 
 
@@ -254,122 +252,6 @@ def _build_story_insights(
     }
 
 
-def _build_content_cluster(
-    keywords: list[str],
-    entities: list[str],
-    tags: list[str],
-    platform: str,
-) -> list[str]:
-    cluster: list[str] = []
-    if not keywords and not entities:
-        return cluster
-
-    subject = entities[0] if entities else keywords[0]
-    secondary = keywords[1] if len(keywords) > 1 else None
-
-    cluster.append(f"Linha do tempo completa ligada a {subject}")
-    if secondary:
-        cluster.append(f"O ponto de virada: quando {subject} mudou por causa de {secondary}")
-    if tags:
-        cluster.append(f"Conexões com {tags[0]} e histórias parecidas")
-    if platform == "tiktok":
-        cluster.append(f"Versão rápida focada no pico de tensão de {subject}")
-    if platform == "instagram":
-        cluster.append(f"Série de Reels explicando a cronologia de {subject}")
-    if platform == "youtube":
-        cluster.append(f"Shorts sequenciais com capítulos do caso de {subject}")
-
-    return cluster[:8]
-
-
-def _build_related_videos(
-    keywords: list[str],
-    entities: list[str],
-    archetype: str,
-    moral_angle: str,
-) -> list[dict[str, str]]:
-    if not keywords and not entities:
-        return []
-
-    subject = entities[0] if entities else keywords[0]
-    secondary = keywords[1] if len(keywords) > 1 else subject
-
-    ideas = [
-        {
-            "idea": f"Reconstituir a sequência que levou {subject} ao ponto de {secondary}.",
-            "focus": "timeline",
-            "why": "Organiza a história para quem chegou pelo corte e melhora retenção.",
-            "role": "timeline reconstruction",
-        },
-        {
-            "idea": f"Mostrar o impacto imediato de {secondary} na vida de {subject}.",
-            "focus": "consequência",
-            "why": "Explora o conflito central e conecta emocionalmente a audiência.",
-            "role": "context expansion",
-        },
-        {
-            "idea": f"Apresentar versões conflitantes sobre {subject} e o que mudou depois.",
-            "focus": "comparação",
-            "why": "O contraste gera debate e prolonga o interesse da audiência.",
-            "role": "comparison",
-        },
-    ]
-
-    if archetype.startswith("Mistério"):
-        ideas.append(
-            {
-                "idea": f"Mapear pistas que ainda deixam o caso de {subject} em aberto.",
-                "focus": "lacunas",
-                "why": "Mantém o suspense e incentiva comentários com teorias.",
-                "role": "part 2",
-            }
-        )
-    if archetype.startswith("Traição") or archetype.startswith("Engano"):
-        ideas.append(
-            {
-                "idea": f"Mostrar como a quebra de confiança em {subject} mudou o entorno social.",
-                "focus": "moral",
-                "why": f"Explora o ângulo de {moral_angle} que faz o público reagir.",
-                "role": "reaction",
-            }
-        )
-
-    return ideas[:5]
-
-
-def _build_opening_strategies(
-    keywords: list[str],
-    entities: list[str],
-    story_insights: dict[str, str],
-    similar_videos: list[dict[str, Any]],
-) -> list[str]:
-    if not keywords and not entities:
-        return []
-
-    subject = entities[0] if entities else keywords[0]
-    action = keywords[1] if len(keywords) > 1 else "o ponto central"
-    tension = story_insights.get("narrative_tension", "")
-
-    strategies = [
-        f"Abrir com o desfecho envolvendo {subject} e voltar para explicar {action}.",
-        f"Começar no pico de tensão que envolve {subject} e retroceder para o gatilho.",
-        f"Mostrar a reação imediata ao que aconteceu com {subject} antes de explicar o fato.",
-    ]
-
-    if similar_videos:
-        top_similar = similar_videos[0].get("title")
-        if top_similar:
-            strategies.append(
-                f"Referenciar o gancho narrativo de "
-                f"“{top_similar[:60]}” e usar como comparação de ritmo." 
-            )
-
-    if tension:
-        strategies.append(f"Destacar {tension.lower()} como cartão inicial antes da linha do tempo.")
-
-    return strategies[:5]
-
-
 def _build_similarity_reason(keywords: list[str], title: str) -> str:
     if not keywords or not title:
         return ""
@@ -390,6 +272,102 @@ def _build_narrative_take(title: str, keywords: list[str]) -> str:
     return f"O título aponta para o conflito principal envolvendo {keywords[0]}."
 
 
+def _build_opening_strategies(
+    subject: str,
+    action: str,
+    story_insights: dict[str, str],
+) -> list[str]:
+    tension = story_insights.get("narrative_tension", "")
+
+    strategies = [
+        f"Abrir com o desfecho envolvendo {subject} e voltar para explicar {action}.",
+        f"Começar no pico de tensão que envolve {subject} e retroceder para o gatilho.",
+        f"Mostrar a reação imediata ao que aconteceu com {subject} antes de explicar o fato.",
+    ]
+
+    if tension:
+        strategies.append(f"Destacar {tension.lower()} como cartão inicial antes da linha do tempo.")
+
+    return strategies[:4]
+
+
+def _build_editorial_blueprint(subject: str, action: str, tension: str) -> dict[str, str]:
+    return {
+        "opening": f"Abrir com {subject} no momento imediatamente após {action}.",
+        "setup": f"Apresentar quem é {subject} e o contexto que levou ao ponto de {action}.",
+        "context": "Explicar os fatos anteriores em 2 ou 3 cenas curtas.",
+        "tension": f"Concentrar a narrativa no que está em jogo e no impacto de {tension}.",
+        "reveal": f"Mostrar a consequência direta do evento envolvendo {subject}.",
+    }
+
+
+def _build_candidate_decisions(
+    keywords: list[str],
+    entities: list[str],
+    archetype: str,
+    moral_angle: str,
+    emotional_triggers: list[str],
+) -> list[dict[str, Any]]:
+    if not keywords and not entities:
+        return []
+
+    subject = entities[0] if entities else keywords[0]
+    secondary = keywords[1] if len(keywords) > 1 else "o ponto crítico"
+    tension = keywords[2] if len(keywords) > 2 else secondary
+
+    candidates = [
+        {
+            "idea": f"Linha do tempo completa: de {subject} até o momento de {secondary}.",
+            "performance_type": "Retention-driven",
+            "risk_level": "low",
+            "role": "timeline reconstruction",
+            "trigger": "curiosidade organizada",
+            "blueprint": _build_editorial_blueprint(subject, secondary, tension),
+            "ending": "Cliffhanger",
+            "rationale": "Organiza o enredo para quem chegou pelo corte e mantém a audiência acompanhando cada etapa.",
+            "score": 3,
+        },
+        {
+            "idea": f"Consequências imediatas: o que mudou para {subject} após {secondary}.",
+            "performance_type": "Series-builder",
+            "risk_level": "medium",
+            "role": "context expansion",
+            "trigger": "tensão e impacto social",
+            "blueprint": _build_editorial_blueprint(subject, secondary, tension),
+            "ending": "Part 2",
+            "rationale": f"Foca no impacto humano de {secondary}, reforçando o ângulo de {moral_angle}.",
+            "score": 2,
+        },
+    ]
+
+    if archetype.startswith("Mistério") or "curiosidade" in emotional_triggers:
+        candidates.append(
+            {
+                "idea": f"Pistas e lacunas: o que ainda não foi explicado sobre {subject}.",
+                "performance_type": "Reach-driven",
+                "risk_level": "high",
+                "role": "part 2",
+                "trigger": "mistério aberto",
+                "blueprint": _build_editorial_blueprint(subject, secondary, tension),
+                "ending": "Question",
+                "rationale": "Explora o desconhecido e incentiva comentários com teorias específicas.",
+                "score": 1,
+            }
+        )
+
+    return candidates
+
+
+def _rank_decisions(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sorted_decisions = sorted(decisions, key=lambda d: d.get("score", 0), reverse=True)
+    ranked = []
+    for idx, decision in enumerate(sorted_decisions[:3], start=1):
+        decision_copy = decision.copy()
+        decision_copy["priority"] = idx
+        ranked.append(decision_copy)
+    return ranked
+
+
 def build_analysis(url: str) -> ViralAnalysisResult:
     platform = detect_platform(url)
     metadata = {}
@@ -405,7 +383,6 @@ def build_analysis(url: str) -> ViralAnalysisResult:
     views = metadata.get("views")
     likes = metadata.get("likes")
     comments = metadata.get("comments")
-    tags = metadata.get("tags") or []
 
     engagement = calculate_engagement(views or 0, likes, comments)
     duration_score = score_duration(duration)
@@ -457,11 +434,28 @@ def build_analysis(url: str) -> ViralAnalysisResult:
             }
         )
 
-    content_cluster = _build_content_cluster(keywords, entities, tags, platform)
-    related_videos = _build_related_videos(keywords, entities, narrative_archetype, moral_angle)
-    opening_strategies = _build_opening_strategies(
-        keywords, entities, story_insights, similar_videos
+    editorial_candidates = _build_candidate_decisions(
+        keywords, entities, narrative_archetype, moral_angle, emotional_triggers
     )
+    ranked_decisions = _rank_decisions(editorial_candidates)
+
+    discarded_reason = None
+    if len(ranked_decisions) < 2:
+        discarded_reason = (
+            "As informações disponíveis não sustentam múltiplos caminhos fortes; "
+            "priorizamos a decisão mais segura."
+        )
+
+    if ranked_decisions:
+        top = ranked_decisions[0]
+        subject = entities[0] if entities else (keywords[0] if keywords else "o tema")
+        action = keywords[1] if len(keywords) > 1 else "o ponto crítico"
+        top["next_if_success"] = (
+            f"Se performar bem, o próximo vídeo deve aprofundar como {subject} chegou a {action}."
+        )
+        top["opening_strategies"] = _build_opening_strategies(
+            subject, action, story_insights
+        )
 
     return ViralAnalysisResult(
         platform=platform,
@@ -482,8 +476,7 @@ def build_analysis(url: str) -> ViralAnalysisResult:
         audience_motivation=motivations,
         emotional_triggers=emotional_triggers or ["curiosidade"],
         story_insights=story_insights,
-        content_cluster=content_cluster,
-        related_videos=related_videos,
         similar_videos=similar_videos,
-        opening_strategies=opening_strategies,
+        editorial_decisions=ranked_decisions,
+        discarded_reason=discarded_reason,
     )
