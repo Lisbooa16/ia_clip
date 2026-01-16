@@ -511,11 +511,39 @@ def make_vertical_clip_with_captions(
 
     sub_path = subtitle_path.replace("\\", "/").replace(":", "\\:")
 
+    font_size = 44
+    margin_v = 140
+    margin_h = 64
+    font_size = max(36, min(font_size, 48))
+    margin_v = min(margin_v, 180)
+    subtitle_style = (
+        "FontName=Montserrat,"
+        f"FontSize={font_size},"
+        "PrimaryColour=&H00FFFFFF,"
+        "OutlineColour=&H00000000,"
+        "BackColour=&H00000000,"
+        "Bold=1,"
+        "Outline=2,"
+        "Shadow=1,"
+        "Alignment=2,"
+        f"MarginL={margin_h},"
+        f"MarginR={margin_h},"
+        f"MarginV={margin_v},"
+        "PlayResX=1080,"
+        "PlayResY=1920,"
+        "WrapStyle=2"
+    )
     vf = (
         "scale=1080:1920:force_original_aspect_ratio=increase,"
         "crop=1080:1920,"
-        f"subtitles=filename='{sub_path}'"
+        f"subtitles=filename='{sub_path}':force_style='{subtitle_style}',"
+        "fps=30,format=yuv420p"
     )
+    print(
+        "[SUB] ✅ style=shortform "
+        f"font=Montserrat size={font_size} margin_v={margin_v} res=1080x1920"
+    )
+    print("[RENDER] 🎞️ output_fps=30")
 
     cmd = [
         FFMPEG_BIN, "-y",
@@ -523,6 +551,9 @@ def make_vertical_clip_with_captions(
         "-to", f"{end:.3f}",
         "-i", video_path,
         "-vf", vf,
+        "-r", "30",
+        "-fps_mode", "cfr",
+        "-avoid_negative_ts", "make_zero",
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-crf", "20",
@@ -531,7 +562,14 @@ def make_vertical_clip_with_captions(
         str(out_mp4),
     ]
 
-    subprocess.check_call(cmd)
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError:
+        fallback_cmd = cmd[:]
+        fallback_cmd[fallback_cmd.index("-preset") + 1] = "ultrafast"
+        fallback_cmd[fallback_cmd.index("-crf") + 1] = "23"
+        print("[RENDER] ⚠️ fallback render retry")
+        subprocess.check_call(fallback_cmd)
 
     # caption simples (opcional, pode vir de outro lugar)
     caption = ""
@@ -550,19 +588,48 @@ def make_vertical_clip_with_focus(
     output_path: Path,
 ):
     sub_path = subtitle_path.replace("\\", "/").replace(":", "\\:")
+    font_size = 44
+    margin_v = 140
+    margin_h = 64
+    font_size = max(36, min(font_size, 48))
+    margin_v = min(margin_v, 180)
+    subtitle_style = (
+        "FontName=Montserrat,"
+        f"FontSize={font_size},"
+        "PrimaryColour=&H00FFFFFF,"
+        "OutlineColour=&H00000000,"
+        "BackColour=&H00000000,"
+        "Bold=1,"
+        "Outline=2,"
+        "Shadow=1,"
+        "Alignment=2,"
+        f"MarginL={margin_h},"
+        f"MarginR={margin_h},"
+        f"MarginV={margin_v},"
+        "PlayResX=1080,"
+        "PlayResY=1920,"
+        "WrapStyle=2"
+    )
 
     if crop:
         vf = (
             f"crop={crop['w']}:{crop['h']}:{crop['x']}:{crop['y']},"
             "scale=1080:1920,"
-            f"subtitles=filename='{sub_path}'"
+            f"subtitles=filename='{sub_path}':force_style='{subtitle_style}',"
+            "fps=30,format=yuv420p"
         )
     else:
         vf = (
             "scale=1080:1920:force_original_aspect_ratio=increase,"
             "crop=1080:1920,"
-            f"subtitles=filename='{sub_path}'"
+            f"subtitles=filename='{sub_path}':force_style='{subtitle_style}',"
+            "fps=30,format=yuv420p"
         )
+    print(
+        "[SUB] ✅ style=shortform "
+        f"font=Montserrat size={font_size} margin_v={margin_v} res=1080x1920"
+    )
+    print("[RENDER] 🎞️ output_fps=30")
 
     cmd = [
         FFMPEG_BIN, "-y",
@@ -570,6 +637,9 @@ def make_vertical_clip_with_focus(
         "-to", f"{end:.3f}",
         "-i", video_path,
         "-vf", vf,
+        "-r", "30",
+        "-fps_mode", "cfr",
+        "-avoid_negative_ts", "make_zero",
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-crf", "20",
@@ -578,7 +648,14 @@ def make_vertical_clip_with_focus(
         str(output_path),
     ]
 
-    subprocess.check_call(cmd)
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError:
+        fallback_cmd = cmd[:]
+        fallback_cmd[fallback_cmd.index("-preset") + 1] = "ultrafast"
+        fallback_cmd[fallback_cmd.index("-crf") + 1] = "23"
+        print("[RENDER] ⚠️ fallback render retry")
+        subprocess.check_call(fallback_cmd)
 
 def transcribe_with_words_to_file(
     video_path: str,
