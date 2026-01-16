@@ -87,20 +87,23 @@ def render_clip(
 
         temp_files = []
         last_crop = None
-        transition_steps = 3
-        max_transition = 0.24
+        transition_steps = 4
+        min_transition = 0.2
+        max_transition = 0.4
 
         def interpolate_crop(a, b, alpha):
             if not a or not b:
                 return b or a
+            eased = alpha * alpha * (3 - 2 * alpha)
             return {
-                "x": int(round(a["x"] + (b["x"] - a["x"]) * alpha)),
-                "y": int(round(a["y"] + (b["y"] - a["y"]) * alpha)),
+                "x": int(round(a["x"] + (b["x"] - a["x"]) * eased)),
+                "y": int(round(a["y"] + (b["y"] - a["y"]) * eased)),
                 "w": a["w"],
                 "h": a["h"],
             }
 
         # 4️⃣ RENDER DE CADA BLOCO
+        last_face_id = None
         for idx, block in enumerate(focus_blocks):
             face_id = block["face_id"]
 
@@ -125,6 +128,8 @@ def render_clip(
                 crop = None
             elif crop is None and last_crop is not None:
                 crop = last_crop
+            elif last_face_id is not None and face_id == last_face_id and last_crop is not None:
+                crop = last_crop
 
             if crop:
                 print(
@@ -142,8 +147,17 @@ def render_clip(
             block_end = block["end"]
             block_duration = block_end - block_start
 
-            if last_crop and crop and last_crop["x"] != crop["x"] and block_duration > 0.1:
-                transition_dur = min(max_transition, block_duration / 2)
+            focus_changed = (
+                last_crop
+                and crop
+                and last_face_id is not None
+                and face_id is not None
+                and face_id != last_face_id
+            )
+            if focus_changed and block_duration > min_transition:
+                transition_dur = min(max_transition, max(min_transition, block_duration / 2))
+                if transition_dur > block_duration:
+                    transition_dur = block_duration
                 step_dur = transition_dur / transition_steps
 
                 for step in range(transition_steps):
@@ -151,6 +165,11 @@ def render_clip(
                     seg_end = seg_start + step_dur
                     alpha = (step + 1) / transition_steps
                     step_crop = interpolate_crop(last_crop, crop, alpha)
+                    print(
+                        "[RENDER] 🎞️ "
+                        f"{seg_start:.3f}-{seg_end:.3f}s "
+                        f"crop x={step_crop['x']}"
+                    )
 
                     temp_out = media_root / "tmp" / f"{clip.id}_{idx}_t{step}.mp4"
                     temp_out.parent.mkdir(parents=True, exist_ok=True)
@@ -188,6 +207,8 @@ def render_clip(
 
             if crop is not None:
                 last_crop = crop
+            if face_id is not None:
+                last_face_id = face_id
 
         # 5️⃣ CONCATENA
         concat_file = media_root / "tmp" / f"{clip.id}_concat.txt"
