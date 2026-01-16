@@ -249,7 +249,7 @@ def render_clip(
             )
             selected_face_id = face_id
             motion_scores = {}
-            if use_motion_check and has_speech and visible_face_ids:
+            if use_motion_check and visible_face_ids:
                 score_start = block_start + confirm_offset
                 score_end = min(block_end, score_start + confirm_window)
                 if score_end - score_start >= min_motion_window:
@@ -259,19 +259,27 @@ def render_clip(
                             score_start,
                             score_end,
                         ) or 0.0
-                    print(f"[FOCUS] 👥 visible={visible_face_ids} scores={motion_scores}")
-                    best_id = max(motion_scores, key=motion_scores.get)
-                    best_score = motion_scores[best_id]
-                    if best_score >= motion_threshold:
+                    boosted_scores = dict(motion_scores)
+                    if has_speech and face_id in boosted_scores:
+                        boosted_scores[face_id] = boosted_scores[face_id] + motion_threshold
+                    print(
+                        f"[FOCUS] 👥 visible={visible_face_ids} "
+                        f"scores={motion_scores} boosted={boosted_scores}"
+                    )
+                    active = {fid: score for fid, score in boosted_scores.items() if score >= motion_threshold}
+                    if active:
+                        best_id = max(active, key=active.get)
+                        best_score = active[best_id]
                         selected_face_id = best_id
                         print(
                             "[FOCUS] 🎯 "
                             f"select={selected_face_id} score={best_score}"
                         )
                     else:
+                        rejected = {fid: score for fid, score in boosted_scores.items() if score < motion_threshold}
                         print(
                             "[FOCUS] 🚫 "
-                            f"no active speaker score={best_score} "
+                            f"no active speaker rejected={rejected} "
                             f"threshold={motion_threshold}"
                         )
                         selected_face_id = last_face_id or face_id
