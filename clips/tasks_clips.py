@@ -114,17 +114,18 @@ def render_clip(
         for face_id in face_index:
             face_index[face_id].sort(key=lambda item: item[0])
 
-        use_motion_check = len(face_index) > 1
+        use_motion_check = len(face_index) > 0
         cap = cv2.VideoCapture(video_path) if use_motion_check else None
         if cap and not cap.isOpened():
             cap.release()
             cap = None
             use_motion_check = False
         motion_threshold = 6.0
-        confirm_offset = 0.12
-        confirm_window = 0.22
+        confirm_offset = 0.0
+        confirm_window = 0.25
         silence_hold = 0.4
         min_motion_window = 0.2
+        transcript_boost = 1.5
 
         def _find_face_box(face_id, t):
             samples = face_index.get(face_id)
@@ -228,6 +229,7 @@ def render_clip(
 
         transcript_segments = transcript.get("segments", [])
         last_speech_end = start
+        current_silence = 0.0
         # 4️⃣ RENDER DE CADA BLOCO
         last_face_id = None
         for idx, block in enumerate(focus_blocks):
@@ -242,57 +244,96 @@ def render_clip(
                 if block_start <= face.get("time", 0) <= block_end
             })
             visible_face_ids = [fid for fid in visible_face_ids if fid is not None]
+            print(
+                "[FOCUS] 👁️ "
+                f"{block_start:.3f}-{block_end:.3f}s visible={visible_face_ids}"
+            )
 
             has_speech = any(
                 seg["end"] > block_start and seg["start"] < block_end
                 for seg in transcript_segments
             )
             selected_face_id = face_id
+            selection_reason = "timeline"
             motion_scores = {}
             if use_motion_check and visible_face_ids:
                 score_start = block_start + confirm_offset
                 score_end = min(block_end, score_start + confirm_window)
-                if score_end - score_start >= min_motion_window:
+                window_duration = score_end - score_start
+                if window_duration >= min_motion_window:
                     for candidate_id in visible_face_ids:
                         motion_scores[candidate_id] = _mouth_motion_score(
                             candidate_id,
                             score_start,
                             score_end,
                         ) or 0.0
-                    boosted_scores = dict(motion_scores)
+                    active_scores = {
+                        fid: score
+                        for fid, score in motion_scores.items()
+                        if score >= motion_threshold
+                    }
+                    boosted_scores = dict(active_scores)
                     if has_speech and face_id in boosted_scores:
-                        boosted_scores[face_id] = boosted_scores[face_id] + motion_threshold
+                        boosted_scores[face_id] = boosted_scores[face_id] + transcript_boost
                     print(
                         f"[FOCUS] 👥 visible={visible_face_ids} "
-                        f"scores={motion_scores} boosted={boosted_scores}"
+                        f"scores={motion_scores} active={active_scores} boosted={boosted_scores}"
                     )
-                    active = {fid: score for fid, score in boosted_scores.items() if score >= motion_threshold}
-                    if active:
-                        best_id = max(active, key=active.get)
-                        best_score = active[best_id]
-                        selected_face_id = best_id
-                        print(
-                            "[FOCUS] 🎯 "
-                            f"select={selected_face_id} score={best_score}"
-                        )
+                    best_id = None
+                    best_score = None
+                    if boosted_scores:
+                        best_id = max(boosted_scores, key=boosted_scores.get)
+                        best_score = boosted_scores[best_id]
+
+                    current_focus_id = last_face_id or face_id
+                    current_motion = motion_scores.get(current_focus_id, 0.0)
+                    if current_focus_id is None:
+                        current_silence = 0.0
+                    elif current_motion >= motion_threshold:
+                        current_silence = 0.0
                     else:
-                        rejected = {fid: score for fid, score in boosted_scores.items() if score < motion_threshold}
-                        print(
-                            "[FOCUS] 🚫 "
-                            f"no active speaker rejected={rejected} "
-                            f"threshold={motion_threshold}"
-                        )
-                        selected_face_id = last_face_id or face_id
+                        current_silence += block_duration
+
+                    if best_id is None:
+                        selection_reason = "no_active"
+                        selected_face_id = current_focus_id or face_id
+                    elif current_focus_id is None:
+                        selection_reason = "initial_motion"
+                        selected_face_id = best_id
+                    elif current_motion >= motion_threshold:
+                        selection_reason = "current_motion"
+                        selected_face_id = current_focus_id
+                    elif current_silence < silence_hold:
+                        selection_reason = "hold_silence"
+                        selected_face_id = current_focus_id
+                    else:
+                        selection_reason = "switch_motion"
+                        selected_face_id = best_id
+
+                    print(
+                        "[FOCUS] 🎯 "
+                        f"select={selected_face_id} reason={selection_reason} "
+                        f"best={best_id} best_score={best_score} silence={current_silence:.2f}"
+                    )
                 else:
+                    print(
+                        "[FOCUS] ⏳ "
+                        f"skip motion window={window_duration:.2f}s"
+                    )
                     selected_face_id = last_face_id or face_id
+                    selection_reason = "short_window"
 
             if selected_face_id != face_id:
                 print(
                     "[FOCUS] 🔁 "
                     f"override {face_id}->{selected_face_id} "
-                    f"speech={has_speech}"
+                    f"speech={has_speech} reason={selection_reason}"
                 )
                 face_id = selected_face_id
+            print(
+                "[FOCUS] ✅ "
+                f"selected face_id={face_id} reason={selection_reason} speech={has_speech}"
+            )
 
             face_box = None
             if face_id is not None:
@@ -325,7 +366,7 @@ def render_clip(
                 print(
                     "[RENDER] ✂️ "
                     f"{block['start']:.3f}-{block['end']:.3f}s "
-                    f"crop x={crop['x']} w={crop['w']}"
+                    f"crop x={crop['x']} y={crop['y']} w={crop['w']} h={crop['h']}"
                 )
             else:
                 print(
@@ -340,37 +381,10 @@ def render_clip(
                 and face_id is not None
                 and face_id != last_face_id
             )
-            confirmed_switch = False
-            if requested_switch:
-                check_start = block_start + confirm_offset
-                check_end = min(block_start + confirm_offset + confirm_window, block_end)
-                motion_score = None
-                if use_motion_check and check_end > check_start:
-                    motion_score = _mouth_motion_score(face_id, check_start, check_end)
-                    print(
-                        "[FOCUS] 🔍 "
-                        f"request {last_face_id}->{face_id} "
-                        f"{check_start:.2f}-{check_end:.2f}s "
-                        f"motion={motion_score}"
-                    )
-                if motion_score is None:
-                    confirmed_switch = True
-                elif motion_score >= motion_threshold:
-                    confirmed_switch = True
-                if confirmed_switch:
-                    print(
-                        "[FOCUS] ✅ "
-                        f"confirm {last_face_id}->{face_id} "
-                        f"motion={motion_score}"
-                    )
-                else:
-                    print(
-                        "[FOCUS] ⏸️ "
-                        f"hold {last_face_id} motion={motion_score}"
-                    )
+            confirmed_switch = requested_switch
 
             if requested_switch and confirmed_switch and block_duration > min_transition:
-                pre_focus_end = min(block_start + confirm_offset + confirm_window, block_end)
+                pre_focus_end = min(block_start + confirm_window, block_end)
                 if last_crop and pre_focus_end > block_start:
                     temp_out = media_root / "tmp" / f"{clip.id}_{idx}_pre.mp4"
                     temp_out.parent.mkdir(parents=True, exist_ok=True)
