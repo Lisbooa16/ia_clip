@@ -403,12 +403,29 @@ def render_clip(
             FFMPEG_BIN, "-y",
             "-f", "concat",
             "-safe", "0",
+            "-fflags", "+genpts",
             "-i", str(concat_file),
-            "-c", "copy",
+            "-r", "30",
+            "-fps_mode", "cfr",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "20",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-af", "aresample=async=1:first_pts=0",
+            "-movflags", "+faststart",
             str(final_out),
         ]
-
-        subprocess.check_call(cmd)
+        print("[RENDER] 🎞️ concat_fps=30 res=1080x1920 pix_fmt=yuv420p")
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError:
+            fallback_cmd = cmd[:]
+            fallback_cmd[fallback_cmd.index("-preset") + 1] = "ultrafast"
+            fallback_cmd[fallback_cmd.index("-crf") + 1] = "23"
+            print("[RENDER] ⚠️ concat fallback retry")
+            subprocess.check_call(fallback_cmd)
 
         clip.output_path = str(final_out)
         clip.save(update_fields=["output_path"])
