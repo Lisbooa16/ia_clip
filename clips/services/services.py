@@ -511,9 +511,14 @@ def make_vertical_clip_with_captions(
 
     sub_path = subtitle_path.replace("\\", "/").replace(":", "\\:")
 
+    output_h = 1920
+    min_font = 36
+    max_font = 64
+    font_size = max(min(int(output_h * 0.035), max_font), min_font)
+    margin_v = max(80, int(output_h * 0.06))
     subtitle_style = (
         "FontName=Montserrat,"
-        "FontSize=64,"
+        f"FontSize={font_size},"
         "PrimaryColour=&H00FFFFFF,"
         "OutlineColour=&H00000000,"
         "BackColour=&H00000000,"
@@ -521,7 +526,7 @@ def make_vertical_clip_with_captions(
         "Outline=3,"
         "Shadow=1,"
         "Alignment=2,"
-        "MarginV=120,"
+        f"MarginV={margin_v},"
         "WrapStyle=2"
     )
     vf = (
@@ -529,7 +534,7 @@ def make_vertical_clip_with_captions(
         "crop=1080:1920,"
         f"subtitles=filename='{sub_path}':force_style='{subtitle_style}'"
     )
-    print(f"[SUB] ✅ style=shortform font=Montserrat size=64")
+    print(f"[SUB] ✅ style=shortform font=Montserrat size={font_size} margin_v={margin_v}")
 
     cmd = [
         FFMPEG_BIN, "-y",
@@ -564,9 +569,14 @@ def make_vertical_clip_with_focus(
     output_path: Path,
 ):
     sub_path = subtitle_path.replace("\\", "/").replace(":", "\\:")
+    output_h = 1920
+    min_font = 36
+    max_font = 64
+    font_size = max(min(int(output_h * 0.035), max_font), min_font)
+    margin_v = max(80, int(output_h * 0.06))
     subtitle_style = (
         "FontName=Montserrat,"
-        "FontSize=64,"
+        f"FontSize={font_size},"
         "PrimaryColour=&H00FFFFFF,"
         "OutlineColour=&H00000000,"
         "BackColour=&H00000000,"
@@ -574,7 +584,7 @@ def make_vertical_clip_with_focus(
         "Outline=3,"
         "Shadow=1,"
         "Alignment=2,"
-        "MarginV=120,"
+        f"MarginV={margin_v},"
         "WrapStyle=2"
     )
 
@@ -590,7 +600,7 @@ def make_vertical_clip_with_focus(
             "crop=1080:1920,"
             f"subtitles=filename='{sub_path}':force_style='{subtitle_style}'"
         )
-    print(f"[SUB] ✅ style=shortform font=Montserrat size=64")
+    print(f"[SUB] ✅ style=shortform font=Montserrat size={font_size} margin_v={margin_v}")
 
     cmd = [
         FFMPEG_BIN, "-y",
