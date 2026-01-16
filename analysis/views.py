@@ -1,48 +1,86 @@
-# analysis/views.py
-from django.shortcuts import render
-from .services.youtube import search_youtube_videos
-from .utils import calculate_engagement, calculate_viral_score
+import json
+from pathlib import Path
+
+from django.conf import settings
+from django.shortcuts import redirect, render
+
+from clips.models import VideoJob
+from clips.services import detect_source
+from clips.tasks import generate_clip_from_blueprint
+
+from .services.viral_analysis import build_analysis
 
 
 def analysis_page(request):
-    query = ""
-    results = []
+    result = None
+    url = ""
+    error = ""
 
     if request.method == "POST":
-        query = request.POST.get("query")
+        url = request.POST.get("url", "").strip()
 
-        if query:
-            videos = search_youtube_videos(query)
-            print(videos)
+        if url:
+            result = build_analysis(url).to_dict()
+        else:
+            error = "Informe uma URL válida."
 
-            for v in videos:
-                if not v:
-                    continue
-                engagement = calculate_engagement(
-                    v.get("views", 0),
-                    v.get("likes"),
-                    v.get("comments"),
-                )
+    return render(
+        request,
+        "analysis/analysis.html",
+        {
+            "url": url,
+            "result": result,
+            "error": error,
+        },
+    )
 
-                viral_score = calculate_viral_score(
-                    v.get("views", 0),
-                    engagement,
-                    v.get("duration"),
-                )
 
-                results.append({
-                    "title": v["title"],
-                    "url": v["url"],
-                    "views": v["views"],
-                    "duration": v["duration"],
-                    "engagement": round(engagement, 4),
-                    "viral_score": viral_score,
-                })
+def generate_clip(request):
+    if request.method != "POST":
+        return redirect("analysis_page")
 
-            results.sort(key=lambda x: x["viral_score"], reverse=True)
-            results = results[:10]
+    url = request.POST.get("url", "").strip()
+    idea = request.POST.get("idea", "").strip()
 
-    return render(request, "analysis/analysis.html", {
-        "query": query,
-        "results": results
-    })
+    blueprint = {
+        "opening": request.POST.get("opening", "").strip(),
+        "setup": request.POST.get("setup", "").strip(),
+        "context": request.POST.get("context", "").strip(),
+        "tension": request.POST.get("tension", "").strip(),
+        "reveal": request.POST.get("reveal", "").strip(),
+        "ending": request.POST.get("ending", "").strip(),
+    }
+
+    if not url or not blueprint["opening"]:
+        return redirect("analysis_page")
+
+    source = detect_source(url)
+    job = VideoJob.objects.create(
+        url=url,
+        language="auto",
+        status="pending",
+        title=idea[:255],
+        source=source,
+    )
+
+    clip_dir = Path(settings.MEDIA_ROOT) / "clips" / str(job.id)
+    clip_dir.mkdir(parents=True, exist_ok=True)
+    blueprint_path = clip_dir / "blueprint.json"
+    blueprint_path.write_text(
+        json.dumps(
+            {
+                "idea": idea,
+                "blueprint": blueprint,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    generate_clip_from_blueprint.apply_async(
+        args=[job.id, str(blueprint_path)],
+        queue="clips_cpu",
+    )
+
+    return redirect("job_detail", job_id=job.id)
