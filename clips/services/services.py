@@ -566,7 +566,6 @@ def make_vertical_clip_with_captions(
         "-r", "30",
         "-fps_mode", "cfr",
         "-avoid_negative_ts", "make_zero",
-        "-af", "aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS",
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-crf", "20",
@@ -594,15 +593,13 @@ def make_vertical_clip_with_focus(
     video_path: str,
     start: float,
     end: float,
-    subtitle_path: str | None,
+    subtitle_path: str,
     media_root: Path,
     clip_id: str,
     crop: dict | None,
     output_path: Path,
 ):
-    sub_path = ""
-    if subtitle_path:
-        sub_path = subtitle_path.replace("\\", "/").replace(":", "\\:")
+    sub_path = subtitle_path.replace("\\", "/").replace(":", "\\:")
     font_size = 44
     margin_v = 140
     margin_h = 64
@@ -634,18 +631,19 @@ def make_vertical_clip_with_focus(
 
     vf_parts = ["setpts=PTS-STARTPTS"]
     if crop:
-        vf_parts.append(f"crop={crop['w']}:{crop['h']}:{crop['x']}:{crop['y']}")
-        vf_parts.append("scale=1080:1920")
+        vf = (
+            f"crop={crop['w']}:{crop['h']}:{crop['x']}:{crop['y']},"
+            "scale=1080:1920,"
+            f"subtitles=filename='{sub_path}':force_style='{subtitle_style}',"
+            "fps=30,format=yuv420p"
+        )
     else:
-        vf_parts.append("scale=1080:1920:force_original_aspect_ratio=increase")
-        vf_parts.append("crop=1080:1920")
-    if subtitle_filter:
-        vf_parts.append(subtitle_filter)
-    vf_parts.extend([
-        "fps=30",
-        "format=yuv420p",
-    ])
-    vf = ",".join(vf_parts)
+        vf = (
+            "scale=1080:1920:force_original_aspect_ratio=increase,"
+            "crop=1080:1920,"
+            f"subtitles=filename='{sub_path}':force_style='{subtitle_style}',"
+            "fps=30,format=yuv420p"
+        )
     print(
         "[SUB] ✅ style=shortform "
         f"font=Montserrat size={font_size} margin_v={margin_v} res=1080x1920"
@@ -661,7 +659,6 @@ def make_vertical_clip_with_focus(
         "-r", "30",
         "-fps_mode", "cfr",
         "-avoid_negative_ts", "make_zero",
-        "-af", "aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS",
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-crf", "20",
