@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import subprocess
 import time
 import uuid
 from pathlib import Path
@@ -22,6 +23,7 @@ from .models import (
 from .services import (
     download_video,
     transcribe_with_words_to_file,
+    FFMPEG_BIN,
 )
 from .services.clip_service import generate_clips
 from .tasks_clips import render_clip, finalize_job
@@ -89,6 +91,281 @@ def _estimate_frames_processed(faces: list) -> int:
         return len({f.get("time") for f in faces if "time" in f})
     except Exception:
         return len(faces)
+
+
+def _normalize_windows(windows: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    normalized = []
+    for start, end in windows:
+        if start is None or end is None:
+            continue
+        try:
+            start_f = max(0.0, float(start))
+            end_f = float(end)
+        except (TypeError, ValueError):
+            continue
+        if end_f <= start_f:
+            continue
+        normalized.append((round(start_f, 3), round(end_f, 3)))
+    normalized.sort(key=lambda w: w[0])
+
+    merged = []
+    adjacency_threshold = 0.5
+    for start, end in normalized:
+        if not merged:
+            merged.append([start, end])
+            continue
+        last = merged[-1]
+        if start <= last[1] + adjacency_threshold:
+            last[1] = max(last[1], end)
+        else:
+            merged.append([start, end])
+    return [(start, end) for start, end in merged]
+
+
+def _extract_time_windows(cut_plans: list[dict]) -> list[tuple[float, float]]:
+    windows = []
+    for plan in cut_plans:
+        if not isinstance(plan, dict):
+            continue
+        windows.append((plan.get("start"), plan.get("end")))
+    return _normalize_windows(windows)
+
+
+def _select_fps_sample(max_window_seconds: float | None) -> int:
+    if not max_window_seconds:
+        return 1
+    if max_window_seconds <= 60:
+        return 1
+    if max_window_seconds <= 300:
+        return 2 if max_window_seconds <= 180 else 3
+    return 4 if max_window_seconds <= 900 else 5
+
+
+def _faces_cache_path_for_job(media_root: Path, job_id: int) -> Path:
+    return media_root / "clips" / str(job_id) / "faces_cached.json"
+
+
+def _build_faces_cache_payload(
+    video_path: str,
+    fps_sample: int,
+    windows: list[tuple[float, float]],
+    faces: list,
+    faces_smooth: list,
+) -> dict:
+    payload = {
+        "video_path": video_path,
+        "fps_sample": fps_sample,
+        "windows": [{"start": start, "end": end} for start, end in windows],
+        "faces": faces,
+        "faces_smooth": faces_smooth,
+    }
+    try:
+        stat = os.stat(video_path)
+        payload["video_mtime_ns"] = stat.st_mtime_ns
+        payload["video_size"] = stat.st_size
+    except OSError:
+        payload["video_mtime_ns"] = None
+        payload["video_size"] = None
+    return payload
+
+
+def _load_faces_window_cache(
+    cache_path: Path,
+    video_path: str,
+    fps_sample: int,
+    windows: list[tuple[float, float]],
+) -> dict | None:
+    if not cache_path.exists():
+        return None
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if payload.get("video_path") != video_path:
+        return None
+    if payload.get("fps_sample") != fps_sample:
+        return None
+    expected_windows = [{"start": start, "end": end} for start, end in windows]
+    if payload.get("windows") != expected_windows:
+        return None
+    try:
+        stat = os.stat(video_path)
+    except OSError:
+        return None
+    if payload.get("video_mtime_ns") != stat.st_mtime_ns:
+        return None
+    if payload.get("video_size") != stat.st_size:
+        return None
+    return payload
+
+
+def _save_faces_window_cache(cache_path: Path, payload: dict) -> None:
+    try:
+        cache_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        return None
+
+
+def _offset_faces_times(faces: list, window_start: float, window_duration: float) -> list:
+    times = [f.get("time") for f in faces if isinstance(f, dict) and "time" in f]
+    if not times or window_start <= 0:
+        return faces
+    max_time = max(times)
+    if max_time <= window_duration + 0.01:
+        adjusted = []
+        for face in faces:
+            if isinstance(face, dict) and "time" in face:
+                updated = dict(face)
+                updated["time"] = updated["time"] + window_start
+                adjusted.append(updated)
+            else:
+                adjusted.append(face)
+        return adjusted
+    return faces
+
+
+def _trim_video_window(
+    video_path: str,
+    start: float,
+    end: float,
+    temp_dir: Path,
+) -> Path | None:
+    try:
+        duration = float(end) - float(start)
+    except (TypeError, ValueError):
+        return None
+    if duration <= 0:
+        return None
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    output_path = temp_dir / f"faces_window_{start:.3f}_{end:.3f}_{uuid.uuid4().hex}.mp4"
+    cmd = [
+        FFMPEG_BIN,
+        "-y",
+        "-ss",
+        f"{start:.3f}",
+        "-t",
+        f"{duration:.3f}",
+        "-i",
+        video_path,
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-crf",
+        "18",
+        str(output_path),
+    ]
+    try:
+        subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        return None
+    if not output_path.exists():
+        return None
+    return output_path
+
+
+def _detect_faces_in_windows(
+    video_path: str,
+    windows: list[tuple[float, float]],
+    fps_sample: int,
+    temp_dir: Path,
+) -> tuple[list, bool]:
+    if not windows:
+        return detect_faces(video_path, fps_sample=fps_sample), False
+
+    faces_collected = []
+    for start, end in windows:
+        window_path = None
+        try:
+            window_path = _trim_video_window(video_path, start, end, temp_dir)
+            if not window_path:
+                return detect_faces(video_path, fps_sample=fps_sample), False
+            window_faces = detect_faces(str(window_path), fps_sample=fps_sample)
+        except Exception:
+            return detect_faces(video_path, fps_sample=fps_sample), False
+        finally:
+            if window_path:
+                try:
+                    window_path.unlink()
+                except OSError:
+                    pass
+        if window_faces:
+            window_faces = _offset_faces_times(window_faces, start, end - start)
+            faces_collected.extend(window_faces)
+    return faces_collected, True
+
+
+def _smooth_faces_linear(faces: list, alpha: float = 0.75) -> list:
+    if len(faces) <= 1:
+        return faces
+    smoothed = []
+    prev = None
+    for face in faces:
+        if not isinstance(face, dict):
+            smoothed.append(face)
+            prev = face
+            continue
+        if prev is None or not isinstance(prev, dict):
+            smoothed_face = dict(face)
+        else:
+            smoothed_face = dict(face)
+            if "bbox" in face and "bbox" in prev:
+                try:
+                    smoothed_face["bbox"] = [
+                        alpha * face["bbox"][i] + (1 - alpha) * prev["bbox"][i]
+                        for i in range(4)
+                    ]
+                except Exception:
+                    smoothed_face["bbox"] = face["bbox"]
+            for key in ("x", "y", "w", "h"):
+                if key in face and key in prev:
+                    try:
+                        smoothed_face[key] = alpha * face[key] + (1 - alpha) * prev[key]
+                    except Exception:
+                        smoothed_face[key] = face[key]
+        smoothed.append(smoothed_face)
+        prev = smoothed_face
+    return smoothed
+
+
+def _smooth_faces_windowed(
+    faces: list,
+    windows: list[tuple[float, float]],
+    alpha: float = 0.75,
+) -> list:
+    if not faces:
+        return faces
+    if not windows:
+        return _smooth_faces_linear(faces, alpha=alpha)
+
+    faces_sorted = sorted(
+        (face for face in faces if isinstance(face, dict) and "time" in face),
+        key=lambda f: f["time"],
+    )
+    remaining = [face for face in faces if not (isinstance(face, dict) and "time" in face)]
+    windowed_faces = [[] for _ in windows]
+
+    window_idx = 0
+    for face in faces_sorted:
+        t = face["time"]
+        while window_idx < len(windows) and t > windows[window_idx][1]:
+            window_idx += 1
+        if window_idx < len(windows) and windows[window_idx][0] <= t <= windows[window_idx][1]:
+            windowed_faces[window_idx].append(face)
+        else:
+            remaining.append(face)
+
+    smoothed = []
+    for faces_in_window in windowed_faces:
+        if len(faces_in_window) <= 1:
+            smoothed.extend(faces_in_window)
+        else:
+            smoothed.extend(_smooth_faces_linear(faces_in_window, alpha=alpha))
+
+    if remaining:
+        smoothed.extend(remaining)
+    return sorted(smoothed, key=lambda f: f.get("time", 0))
 
 
 @shared_task(bind=True)
@@ -488,17 +765,32 @@ def generate_clip_from_blueprint(self, job_id: int, blueprint_path: str):
 
         transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
 
+        cut_plans = generate_clip_sequence(transcript, blueprint_data, job.source or "other")
+        if not cut_plans:
+            cut_plans = [translate_blueprint_to_cut_plan(transcript, blueprint_data)]
+
+        windows = _extract_time_windows(cut_plans)
+        max_window_seconds = max((end - start) for start, end in windows) if windows else None
+
         clip_dir = media_root / "clips" / str(job.id)
         clip_dir.mkdir(parents=True, exist_ok=True)
 
         update_job_step(job.id, "faces", "running")
-        fps_sample = 1
+        fps_sample = _select_fps_sample(max_window_seconds)
         faces = []
         faces_smooth = []
-        cache_payload = _load_faces_cache(media_root, job.original_path, fps_sample)
+        cache_path = _faces_cache_path_for_job(media_root, job.id)
+        cache_payload = _load_faces_window_cache(
+            cache_path,
+            job.original_path,
+            fps_sample,
+            windows,
+        )
+        cache_used = False
         if cache_payload:
             faces = cache_payload.get("faces", [])
             faces_smooth = cache_payload.get("faces_smooth", [])
+            cache_used = True
             print(
                 "[FACES] ✅ cache hit "
                 f"fps_sample={fps_sample} frames={_estimate_frames_processed(faces)}"
@@ -506,28 +798,47 @@ def generate_clip_from_blueprint(self, job_id: int, blueprint_path: str):
 
         if not faces:
             t0 = time.time()
-            faces = detect_faces(job.original_path, fps_sample=fps_sample)
+            windowed = False
+            try:
+                faces, windowed = _detect_faces_in_windows(
+                    job.original_path,
+                    windows,
+                    fps_sample,
+                    clip_dir / "faces_windows_tmp",
+                )
+            except Exception:
+                faces = detect_faces(job.original_path, fps_sample=fps_sample)
             t1 = time.time()
             print(
                 "[FACES] detect_faces "
                 f"fps_sample={fps_sample} "
                 f"frames={_estimate_frames_processed(faces)} "
-                f"t={t1 - t0:.2f}s"
+                f"t={t1 - t0:.2f}s "
+                f"cache={cache_used} "
+                f"windowed={windowed}"
             )
 
         if not faces_smooth:
             t0 = time.time()
-            faces_smooth = smooth_faces(faces, alpha=0.75)
+            faces_smooth = _smooth_faces_windowed(faces, windows, alpha=0.75)
             t1 = time.time()
             print(
                 "[FACES] smooth_faces "
                 f"fps_sample={fps_sample} "
                 f"frames={_estimate_frames_processed(faces)} "
-                f"t={t1 - t0:.2f}s"
+                f"t={t1 - t0:.2f}s "
+                f"cache={cache_used}"
             )
 
         if faces and faces_smooth:
-            _save_faces_cache(media_root, job.original_path, fps_sample, faces, faces_smooth)
+            payload = _build_faces_cache_payload(
+                job.original_path,
+                fps_sample,
+                windows,
+                faces,
+                faces_smooth,
+            )
+            _save_faces_window_cache(cache_path, payload)
         faces_tracked = track_faces(faces_smooth) if faces_smooth else []
 
         faces_tracked_path = clip_dir / "faces_tracked.json"
@@ -542,10 +853,6 @@ def generate_clip_from_blueprint(self, job_id: int, blueprint_path: str):
         with open(focus_path, "w", encoding="utf-8") as f:
             json.dump(focus_timeline, f, indent=2)
         update_job_step(job.id, "faces", "done")
-
-        cut_plans = generate_clip_sequence(transcript, blueprint_data, job.source or "other")
-        if not cut_plans:
-            cut_plans = [translate_blueprint_to_cut_plan(transcript, blueprint_data)]
 
         job.status = "clipping"
         job.save(update_fields=["status"])
