@@ -323,6 +323,133 @@ def pick_viral_windows(transcript: dict, min_s=18, max_s=40, top_k=6) -> list[di
     filtered.sort(key=lambda x: x["start"])
     return filtered
 
+
+def pick_viral_windows_rich(transcript: dict, min_s=18, max_s=40, top_k=6) -> list[dict]:
+    segs = transcript.get("segments", [])
+    if not segs:
+        return []
+
+    # 1) Texto global (para entender narrativa)
+    full_text = " ".join((s.get("text") or "") for s in segs)
+    keywords = _extract_keywords(full_text)
+    archetype, category, motivations, moral_angle = _classify_story(keywords, full_text)
+    emotions = _infer_emotions(full_text)
+
+    # 2) hook words base + palavras derivadas do arquétipo
+    base_hooks = {
+        "curiosity": [
+            "ninguém", "no one", "ninguém te conta", "segredo", "secret",
+            "você não sabia", "you didn’t know", "sabia disso",
+        ],
+        "drama": [
+            "traição", "vazou", "exposed", "exposição", "cancelado", "polêmica",
+            "escândalo", "destruiu", "acabou",
+        ],
+        "money": [
+            "dinheiro", "money", "ficar rico", "milionário", "fácil", "rápido",
+            "erro que te impede", "perdendo dinheiro",
+        ],
+    }
+
+    archetype_hooks = []
+    if "Mistério" in archetype:
+        archetype_hooks += ["mistério", "misterio", "sumiu", "desapareceu", "ninguém sabe"]
+    if "Fraude" in archetype or "Engano" in archetype:
+        archetype_hooks += ["golpe", "fraude", "esquema", "piramide", "furada"]
+    if "Traição" in archetype:
+        archetype_hooks += ["traiu", "traição", "vazou", "vazamento", "mentiu"]
+
+    all_hooks = set(
+        base_hooks["curiosity"]
+        + base_hooks["drama"]
+        + base_hooks["money"]
+        + archetype_hooks
+    )
+
+    # 3) pré-cálculo segmento a segmento
+    meta = []
+    for s in segs:
+        text = (s.get("text") or "").lower()
+        tokens = re.findall(r"\w+", text)
+        hooks = sum(1 for hw in all_hooks if hw.lower() in text)
+
+        meta.append({
+            "start": s["start"],
+            "end": s["end"],
+            "text": s["text"],
+            "tokens": len(tokens),
+            "hooks": hooks,
+        })
+
+    picks = []
+    i = 0
+    n = len(meta)
+
+    while i < n:
+        j = i
+        while j < n and (meta[j]["end"] - meta[i]["start"]) < min_s:
+            j += 1
+
+        best = None
+        k = j
+        while k < n and (meta[k]["end"] - meta[i]["start"]) <= max_s:
+            window = meta[i:k+1]
+            dur = window[-1]["end"] - window[0]["start"]
+            if dur < min_s:
+                k += 1
+                continue
+
+            tokens = sum(x["tokens"] for x in window)
+            hooks = sum(x["hooks"] for x in window)
+
+            base_score = (tokens / max(dur, 1.0)) + hooks * 1.5
+
+            # 4) boosts por emoção/narrativa
+            boost = 1.0
+            if "curiosidade" in emotions:
+                boost += 0.15
+            if "tensão" in emotions:
+                boost += 0.10
+            if "indignação" in emotions:
+                boost += 0.10
+            if archetype.startswith("Mistério"):
+                boost += 0.15
+
+            score = base_score * boost
+
+            if best is None or score > best["score"]:
+                best = {
+                    "start": window[0]["start"],
+                    "end": window[-1]["end"],
+                    "score": float(score),
+                    "caption": window[0]["text"][:120],
+                }
+
+            k += 1
+
+        if best:
+            picks.append(best)
+
+        i += 1
+
+    # mesmo filtro de overlap e top_k do MVP antigo
+    picks.sort(key=lambda x: x["score"], reverse=True)
+
+    filtered = []
+    for p in picks:
+        overlap = any(
+            not (p["end"] <= f["start"] or p["start"] >= f["end"])
+            for f in filtered
+        )
+        if not overlap:
+            filtered.append(p)
+        if len(filtered) >= top_k:
+            break
+
+    filtered.sort(key=lambda x: x["start"])
+    return filtered
+
+
 def calc_font_size(text: str):
     """
     Fonte base estilo CapCut.

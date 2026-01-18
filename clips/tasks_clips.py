@@ -120,12 +120,13 @@ def render_clip(
             cap.release()
             cap = None
             use_motion_check = False
-        motion_threshold = 6.0
+        motion_threshold = 2.5
+        motion_delta = 0.8
+        silence_hold = 0.5
         confirm_offset = 0.0
         confirm_window = 0.25
-        silence_hold = 0.4
-        min_motion_window = 0.2
-        transcript_boost = 1.5
+        min_motion_window = 0.15
+        transcript_boost = 1.0
 
         def _find_face_box(face_id, t):
             samples = face_index.get(face_id)
@@ -253,75 +254,104 @@ def render_clip(
                 seg["end"] > block_start and seg["start"] < block_end
                 for seg in transcript_segments
             )
+
             selected_face_id = face_id
             selection_reason = "timeline"
             motion_scores = {}
+
             if use_motion_check and visible_face_ids:
                 score_start = block_start + confirm_offset
                 score_end = min(block_end, score_start + confirm_window)
                 window_duration = score_end - score_start
-                if window_duration >= min_motion_window:
+
+                if window_duration >= min_motion_window and has_speech:
+                    # ⚡ Só analisamos boca se há fala nesse bloco
                     for candidate_id in visible_face_ids:
                         motion_scores[candidate_id] = _mouth_motion_score(
                             candidate_id,
                             score_start,
                             score_end,
                         ) or 0.0
-                    active_scores = {
-                        fid: score
-                        for fid, score in motion_scores.items()
-                        if score >= motion_threshold
-                    }
-                    boosted_scores = dict(active_scores)
-                    if has_speech and face_id in boosted_scores:
-                        boosted_scores[face_id] = boosted_scores[face_id] + transcript_boost
-                    print(
-                        f"[FOCUS] 👥 visible={visible_face_ids} "
-                        f"scores={motion_scores} active={active_scores} boosted={boosted_scores}"
-                    )
-                    best_id = None
-                    best_score = None
-                    if boosted_scores:
-                        best_id = max(boosted_scores, key=boosted_scores.get)
-                        best_score = boosted_scores[best_id]
 
                     current_focus_id = last_face_id or face_id
                     current_motion = motion_scores.get(current_focus_id, 0.0)
-                    if current_focus_id is None:
-                        current_silence = 0.0
-                    elif current_motion >= motion_threshold:
-                        current_silence = 0.0
-                    else:
-                        current_silence += block_duration
 
-                    if best_id is None:
-                        selection_reason = "no_active"
-                        selected_face_id = current_focus_id or face_id
-                    elif current_focus_id is None:
-                        selection_reason = "initial_motion"
-                        selected_face_id = best_id
-                    elif current_motion >= motion_threshold:
-                        selection_reason = "current_motion"
-                        selected_face_id = current_focus_id
-                    elif current_silence < silence_hold:
-                        selection_reason = "hold_silence"
-                        selected_face_id = current_focus_id
+                    # melhor candidato por movimento de boca
+                    if motion_scores:
+                        best_id = max(motion_scores, key=motion_scores.get)
+                        best_score = motion_scores[best_id]
                     else:
-                        selection_reason = "switch_motion"
-                        selected_face_id = best_id
+                        best_id = None
+                        best_score = 0.0
+
+                    # pequeno viés para o rosto “previsto” na timeline
+                    if face_id is not None and face_id in motion_scores:
+                        motion_scores[face_id] = motion_scores[face_id] + transcript_boost
+                        best_id = max(motion_scores, key=motion_scores.get)
+                        best_score = motion_scores[best_id]
+
+                    # Ninguém mexendo a boca o suficiente → segura último foco
+                    if best_score < motion_threshold:
+                        selected_face_id = current_focus_id or best_id or face_id
+                        selection_reason = "below_threshold_hold"
+                        current_silence += block_duration
+                    else:
+                        # ainda não temos foco definido → assume melhor candidato
+                        if current_focus_id is None:
+                            selected_face_id = best_id
+                            selection_reason = "initial_speaker"
+                            current_silence = 0.0
+                        else:
+                            # mesmo rosto continua falando
+                            if best_id == current_focus_id:
+                                selected_face_id = current_focus_id
+                                selection_reason = "same_speaker"
+                                current_silence = 0.0
+                            else:
+                                # novo rosto com boca forte:
+                                # troca só se ele é bem melhor OU já estamos em silêncio
+                                if (
+                                        best_score >= current_motion + motion_delta
+                                        or current_silence >= silence_hold
+                                ):
+                                    selected_face_id = best_id
+                                    selection_reason = "switch_speaker"
+                                    current_silence = 0.0
+                                else:
+                                    selected_face_id = current_focus_id
+                                    selection_reason = "hold_current"
+                                    current_silence += block_duration
 
                     print(
-                        "[FOCUS] 🎯 "
-                        f"select={selected_face_id} reason={selection_reason} "
-                        f"best={best_id} best_score={best_score} silence={current_silence:.2f}"
+                        "[FOCUS] 👥 visible=%s scores=%s best=%s best_score=%.2f "
+                        "current=%s current_motion=%.2f reason=%s silence=%.2f"
+                        % (
+                            visible_face_ids,
+                            motion_scores,
+                            best_id,
+                            best_score,
+                            current_focus_id,
+                            current_motion,
+                            selection_reason,
+                            current_silence,
+                        )
                     )
                 else:
-                    print(
-                        "[FOCUS] ⏳ "
-                        f"skip motion window={window_duration:.2f}s"
-                    )
+                    # ❌ Sem fala ou janela muito curta → NÃO troca foco
                     selected_face_id = last_face_id or face_id
-                    selection_reason = "short_window"
+                    selection_reason = "short_or_no_speech"
+
+            if selected_face_id != face_id:
+                print(
+                    "[FOCUS] 🔁 override %s->%s speech=%s reason=%s"
+                    % (face_id, selected_face_id, has_speech, selection_reason)
+                )
+                face_id = selected_face_id
+
+            print(
+                "[FOCUS] ✅ selected face_id=%s reason=%s speech=%s"
+                % (face_id, selection_reason, has_speech)
+            )
 
             if selected_face_id != face_id:
                 print(

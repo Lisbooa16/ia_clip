@@ -703,7 +703,7 @@ def pick_and_render(self, job_id: int):
 
         # picks
         print(f"[PICK] 🔍 Rodando pick_viral_windows...")
-        picks = generate_clips(transcript)
+        picks = pick_viral_windows_rich(transcript, min_s=18, max_s=40, top_k=6)
 
         print(f"[PICK] 🎯 Picks encontrados: {len(picks)}")
 

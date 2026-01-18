@@ -65,6 +65,7 @@ def build_focus_timeline(
 
         chosen = _pick_face(faces_in_segment, frame_w, frame_h)
 
+        # evita trocar muito rápido
         if chosen != last_face and duration < min_switch_duration:
             chosen = last_face
 
@@ -72,6 +73,12 @@ def build_focus_timeline(
             chosen = last_face
         elif chosen != last_face:
             last_switch = start
+
+        # 👇 NÃO zera o último rosto se perder detecção
+        if chosen is None:
+            chosen = last_face
+        else:
+            last_face = chosen
 
         if timeline and timeline[-1]["face_id"] == chosen:
             timeline[-1]["end"] = end
@@ -81,10 +88,5 @@ def build_focus_timeline(
                 "end": end,
                 "face_id": chosen,
             })
-
-        if chosen is None:
-            last_face = None
-        else:
-            last_face = chosen
 
     return timeline
