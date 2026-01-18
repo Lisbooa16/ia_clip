@@ -1,9 +1,15 @@
-from clips.viral_engine.profiles import DEFAULT_PROFILE
+from clips.viral_engine.profiles import DEFAULT_PROFILE, get_profile
 from clips.viral_engine.window_picker import pick_viral_windows_generic
 
 
-def generate_clips(transcript, profile=None):
-    return pick_viral_windows_generic(
+def generate_clips(transcript, channel_type="youtube_shorts", archetype=None, top_k=6):
+    profile = get_profile(channel_type=channel_type, archetype=archetype)
+    picks = pick_viral_windows_generic(
         transcript,
-        profile or DEFAULT_PROFILE
+        profile,
+        min_s=8,
+        max_s=20,  # Aumentei um pouco o range para dar mais flexibilidade
+        top_k=top_k
     )
+
+    return picks

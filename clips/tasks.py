@@ -10,6 +10,7 @@ import cv2
 from celery import shared_task, chord
 from django.conf import settings
 
+from analysis.services.viral_analysis import _extract_keywords, _classify_story
 from .focus_strategy import build_focus_timeline
 from .media.crop_logic import build_crop_timeline
 from .media.face_detection import detect_faces
@@ -24,7 +25,7 @@ from .models import (
 from .services import (
     download_video,
     transcribe_with_words_to_file,
-    FFMPEG_BIN,
+    FFMPEG_BIN, pick_viral_windows_rich,
 )
 from .services.clip_service import generate_clips
 from .tasks_clips import render_clip, finalize_job
@@ -703,7 +704,16 @@ def pick_and_render(self, job_id: int):
 
         # picks
         print(f"[PICK] 🔍 Rodando pick_viral_windows...")
-        picks = pick_viral_windows_rich(transcript, min_s=18, max_s=40, top_k=6)
+        full_text = " ".join(s.get("text", "") for s in transcript.get("segments", []))
+        keywords = _extract_keywords(full_text)
+        archetype, _, _, _ = _classify_story(keywords, full_text)
+        channel_type = "youtube_shorts"
+        picks = generate_clips(
+            transcript,
+            channel_type=channel_type,
+            archetype=archetype
+        )
+        # picks = pick_viral_windows_rich(transcript, min_s=18, max_s=40, top_k=6)
 
         print(f"[PICK] 🎯 Picks encontrados: {len(picks)}")
 

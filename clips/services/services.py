@@ -13,6 +13,9 @@ import pysubs2
 from faster_whisper import WhisperModel
 from yt_dlp import DownloadError
 
+from analysis.services.viral_analysis import _extract_keywords
+
+
 def gpu_cleanup():
     try:
         import torch, gc, sys
