@@ -267,12 +267,12 @@
                                             </ul>
                                         </div>
                                     {% endif %}
-                                    
+
                                     <!-- 🔥 FORMULÁRIO AJUSTADO COM MODO VIRAL/MANUAL -->
                                     <form method="post" action="{% url 'analysis_generate_clip' %}" class="generate-form" id="generateForm{{ forloop.counter }}">
                                         {% csrf_token %}
                                         <input type="hidden" name="url" value="{{ url }}">
-                                        
+
                                         <!-- Seletor de Modo -->
                                         <div class="mode-selector">
                                             <div class="mode-option">
@@ -375,7 +375,7 @@
         function toggleMode(formId, mode) {
             const viralOptions = document.getElementById('viralOptions' + formId);
             const blueprintFields = document.getElementById('blueprintFields' + formId);
-            
+
             if (mode === 'viral') {
                 viralOptions.style.display = 'block';
                 blueprintFields.classList.remove('active');
