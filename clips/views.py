@@ -8,7 +8,7 @@ from django.views.decorators.http import require_POST
 
 from .models import ClipPublication, VideoJob, VideoClip, get_job_progress
 from .services import make_vertical_clip_with_captions
-from .tasks import process_video_job
+from .tasks import process_video_job, publish_clip_to_youtube
 
 def home(request):
     if request.method == "POST":
@@ -27,9 +27,17 @@ def home(request):
 
 def publishing_guide(request):
     publishing = settings.SOCIAL_PUBLISHING
+    readiness = {
+        "youtube": ["client_id", "client_secret", "refresh_token"],
+        "instagram": ["app_id", "app_secret"],
+        "tiktok": ["client_key", "client_secret"],
+    }
     status = {
         platform: {
             "configured": bool(cfg.get("client_id") and cfg.get("client_secret")),
+            "configured": bool(
+                all(cfg.get(field) for field in readiness.get(platform, []))
+            ),
             "note": cfg.get("note", ""),
         }
         for platform, cfg in publishing.items()
@@ -152,13 +160,14 @@ def publish_clip_youtube(request, clip_id):
         )
         return redirect("job_detail", job_id=job.id)
 
-    ClipPublication.objects.create(
+    publication = ClipPublication.objects.create(
         clip=clip,
         platform="youtube",
         title=title,
         description=description,
         status="queued",
     )
+    publish_clip_to_youtube.apply_async(args=[publication.id], queue="clips_cpu")
     messages.success(
         request,
         "Solicitação criada. Próximo passo: implementar o upload via YouTube Data API.",

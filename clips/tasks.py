@@ -17,6 +17,7 @@ from .media.face_detection import detect_faces
 from .media.face_smoothing import smooth_faces
 from .media.face_tracking import track_faces
 from .models import (
+    ClipPublication,
     VideoJob,
     ensure_job_steps,
     update_job_step,
@@ -30,7 +31,7 @@ from .services import (
 from .services.clip_service import generate_clips
 from .tasks_clips import render_clip, finalize_job
 from .translator import translate_blueprint_to_cut_plan, generate_clip_sequence
-
+from .services.youtube_service import upload_clip_publication
 
 def _faces_cache_key(video_path: str, fps_sample: int) -> str | None:
     try:
@@ -1089,4 +1090,23 @@ def generate_clip_from_blueprint(self, job_id: int, blueprint_path: str):
         job.status = "error"
         job.error = str(e)
         job.save(update_fields=["status", "error"])
+        raise
+
+@shared_task(bind=True)
+def publish_clip_to_youtube(self, publication_id: int):
+    publication = ClipPublication.objects.select_related("clip").get(id=publication_id)
+    publication.status = "publishing"
+    publication.error = ""
+    publication.save(update_fields=["status", "error"])
+
+    try:
+        result = upload_clip_publication(publication)
+        publication.status = "published"
+        publication.external_url = result.get("url", "")
+        publication.save(update_fields=["status", "external_url"])
+        return result
+    except Exception as exc:
+        publication.status = "error"
+        publication.error = str(exc)
+        publication.save(update_fields=["status", "error"])
         raise

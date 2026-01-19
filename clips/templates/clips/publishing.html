@@ -184,7 +184,8 @@
           {% if publishing_status.youtube.configured %}
             ✅ configurado
           {% else %}
-            ❌ faltando <code>YOUTUBE_CLIENT_ID</code> ou <code>YOUTUBE_CLIENT_SECRET</code>
+            ❌ faltando <code>YOUTUBE_CLIENT_ID</code>, <code>YOUTUBE_CLIENT_SECRET</code>
+            ou <code>YOUTUBE_REFRESH_TOKEN</code>
           {% endif %}
           — {{ publishing_status.youtube.note }}
         </li>

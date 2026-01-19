@@ -131,18 +131,9 @@ CELERY_TASK_SOFT_TIME_LIMIT = 55 * 60
 
 SOCIAL_PUBLISHING = {
     "youtube": {
-        "client_id": os.getenv("YOUTUBE_CLIENT_ID", ""),
-        "client_secret": os.getenv("YOUTUBE_CLIENT_SECRET", ""),
+        "client_id": '6270987822-5qle9rv88ttmiii9s66kdokm7voh36sr.apps.googleusercontent.com',
+        "client_secret": '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',
+        "refresh_token": '1//0hk53ZUehMbWtCgYIARAAGBESNwF-L9Irq9svXzuA2Q5EXcRaK8pKp6NW7hHD2x3rwjUdOG6ALc4HAnoMwq50VA2bUdO4fP3oGMA',
         "note": "OAuth obrigatório (não existe upload só com API key).",
-    },
-    "instagram": {
-        "app_id": os.getenv("META_APP_ID", ""),
-        "app_secret": os.getenv("META_APP_SECRET", ""),
-        "note": "Requer Instagram Graph API com conta Business/Creator.",
-    },
-    "tiktok": {
-        "client_key": os.getenv("TIKTOK_CLIENT_KEY", ""),
-        "client_secret": os.getenv("TIKTOK_CLIENT_SECRET", ""),
-        "note": "Requer aprovação na TikTok for Developers.",
     },
 }
