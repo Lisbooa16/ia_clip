@@ -33,6 +33,7 @@ class VideoJob(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     transcript_data = models.JSONField(null=True, blank=True)
     transcript_path = models.JSONField(null=True, blank=True)
+    video_profile = models.CharField(max_length=50, default="podcast")
 
 
 class VideoJobStep(models.Model):

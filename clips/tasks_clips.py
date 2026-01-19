@@ -25,6 +25,8 @@ def render_clip(
     end: float,
     score: float,
     role: str | None = None,
+    anchor_start: float | None = None,  # ← NOVO parâmetro (pico de hook)
+    anchor_end: float | None = None,    # ← NOVO parâmetro (fim do hook)
 ):
     media_root = Path(settings.MEDIA_ROOT)
     clip_dir = media_root / "clips" / str(job_id)
@@ -40,7 +42,7 @@ def render_clip(
     )
 
     try:
-        # 1️⃣ LEGENDA (igual você já faz)
+        # 1️⃣ LEGENDA (como já fazia)
         segments = segments_for_clip(transcript["segments"], start, end)
         segments = fill_gaps(segments)
         srt_text = to_srt(segments)
@@ -65,13 +67,14 @@ def render_clip(
         else:
             faces_tracked = []
 
-        # 3️⃣ SPLIT DO CLIP POR FOCO
+        # 3️⃣ GERA FOCUS BLOCKS PARA O CLIP
         focus_blocks = focus_blocks_for_clip(
             focus_timeline,
             start,
             end
         )
 
+        # Se não tiver focus blocks, mantém comportamento antigo (sem hook replay)
         if not focus_blocks:
             out_mp4, caption = make_vertical_clip_with_captions(
                 video_path=video_path,
@@ -89,6 +92,46 @@ def render_clip(
         print(f"[RENDER] 🎯 focus_blocks={len(focus_blocks)} clip_id={clip.id}")
 
         temp_files = []
+
+        # 3.1️⃣ HOOK REPLAY (opcional)
+        # Se vier anchor_start/anchor_end, criamos um mini preview antes do clipe completo.
+        if anchor_start is not None:
+            HOOK_PREVIEW_MAX_DURATION = 6.0   # duração máx. do replay
+            HOOK_PREVIEW_LEAD_IN = 0.5        # segundos antes do anchor_start
+            HOOK_PREVIEW_TAIL = 0.5           # segundos depois do anchor_end/anchor_start
+
+            base = anchor_start
+            anchor_tail = anchor_end if anchor_end is not None else anchor_start
+
+            preview_start = max(start, base - HOOK_PREVIEW_LEAD_IN)
+            preview_end = min(end, anchor_tail + HOOK_PREVIEW_TAIL)
+
+            if preview_end - preview_start > HOOK_PREVIEW_MAX_DURATION:
+                preview_end = preview_start + HOOK_PREVIEW_MAX_DURATION
+
+            if preview_end - preview_start >= 0.7:
+                hook_out = media_root / "tmp" / f"{clip.id}_hook.mp4"
+                hook_out.parent.mkdir(parents=True, exist_ok=True)
+
+                print(
+                    "[HOOK] 🎬 preview "
+                    f"{preview_start:.3f}-{preview_end:.3f}s "
+                    f"(anchor={anchor_start:.3f}-{(anchor_end or anchor_start):.3f}s)"
+                )
+
+                # Aqui usamos legenda + corte simples (sem lógica de foco)
+                make_vertical_clip_with_captions(
+                    video_path=video_path,
+                    start=preview_start,
+                    end=preview_end,
+                    subtitle_path=str(srt_path),
+                    media_root=media_root,
+                    clip_id=f"{clip.id}_hook",
+                    output_path=hook_out,
+                )
+                temp_files.append(hook_out)
+
+        # 4️⃣ RENDER POR BLOCO DE FOCO (lógica de speaker focus + mouth motion)
         last_crop = None
         transition_steps = 4
         min_transition = 0.2
@@ -120,6 +163,8 @@ def render_clip(
             cap.release()
             cap = None
             use_motion_check = False
+
+        # Hiperparâmetros de foco de fala
         motion_threshold = 2.5
         motion_delta = 0.8
         silence_hold = 0.5
@@ -231,8 +276,8 @@ def render_clip(
         transcript_segments = transcript.get("segments", [])
         last_speech_end = start
         current_silence = 0.0
-        # 4️⃣ RENDER DE CADA BLOCO
         last_face_id = None
+
         for idx, block in enumerate(focus_blocks):
             face_id = block["face_id"]
             block_start = block["start"]
@@ -311,8 +356,8 @@ def render_clip(
                                 # novo rosto com boca forte:
                                 # troca só se ele é bem melhor OU já estamos em silêncio
                                 if (
-                                        best_score >= current_motion + motion_delta
-                                        or current_silence >= silence_hold
+                                    best_score >= current_motion + motion_delta
+                                    or current_silence >= silence_hold
                                 ):
                                     selected_face_id = best_id
                                     selection_reason = "switch_speaker"
@@ -346,23 +391,11 @@ def render_clip(
                     "[FOCUS] 🔁 override %s->%s speech=%s reason=%s"
                     % (face_id, selected_face_id, has_speech, selection_reason)
                 )
-                face_id = selected_face_id
+            face_id = selected_face_id
 
             print(
                 "[FOCUS] ✅ selected face_id=%s reason=%s speech=%s"
                 % (face_id, selection_reason, has_speech)
-            )
-
-            if selected_face_id != face_id:
-                print(
-                    "[FOCUS] 🔁 "
-                    f"override {face_id}->{selected_face_id} "
-                    f"speech={has_speech} reason={selection_reason}"
-                )
-                face_id = selected_face_id
-            print(
-                "[FOCUS] ✅ "
-                f"selected face_id={face_id} reason={selection_reason} speech={has_speech}"
             )
 
             face_box = None
@@ -382,6 +415,7 @@ def render_clip(
                     frame_h=1080,
                 )
 
+            # fallback de foco em silêncio curto
             if face_id is None and last_face_id is not None and (block_start - last_speech_end) < silence_hold:
                 face_id = last_face_id
                 crop = last_crop
@@ -413,6 +447,7 @@ def render_clip(
             )
             confirmed_switch = requested_switch
 
+            # TRANSIÇÃO SUAVE ENTRE ROSTOS
             if requested_switch and confirmed_switch and block_duration > min_transition:
                 pre_focus_end = min(block_start + confirm_window, block_end)
                 if last_crop and pre_focus_end > block_start:
@@ -494,7 +529,7 @@ def render_clip(
         if cap:
             cap.release()
 
-        # 5️⃣ CONCATENA
+        # 5️⃣ CONCATENA (Hook Replay + blocos de foco)
         concat_file = media_root / "tmp" / f"{clip.id}_concat.txt"
         with open(concat_file, "w") as f:
             for t in temp_files:

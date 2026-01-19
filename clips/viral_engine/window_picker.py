@@ -5,8 +5,8 @@ from .expansion import expand_window, generate_hook_caption
 def pick_viral_windows_generic(
     transcript,
     profile,
-    min_s=8,
-    max_s=20,
+    min_s=35,
+    max_s=45,
     top_k=6,
 ):
     segs = transcript.get("segments", [])
@@ -20,6 +20,7 @@ def pick_viral_windows_generic(
             continue
 
         hook_start = segs[i]["start"]
+        hook_end = segs[i]["end"]
 
         start, end = expand_window(
             segs,
@@ -43,6 +44,8 @@ def pick_viral_windows_generic(
         candidates.append({
             "start": start,
             "end": end,
+            "anchor_start": hook_start,  # ← NOVO: onde o hook foi detectado
+            "anchor_end": hook_end,      # ← NOVO: fim do segmento do hook
             "duration": duration,
             "score": final_score,
             "hooks": hooks,
@@ -52,7 +55,7 @@ def pick_viral_windows_generic(
 
     candidates.sort(key=lambda x: x["score"], reverse=True)
 
-    MIN_GAP_BETWEEN_CLIPS = 12.0  # segundos
+    MIN_GAP_BETWEEN_CLIPS = 60.0  # ← AUMENTADO: força clips bem separados
 
     final = []
     for c in candidates:

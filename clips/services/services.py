@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import yt_dlp
 import pysubs2
@@ -14,6 +15,9 @@ from faster_whisper import WhisperModel
 from yt_dlp import DownloadError
 
 from analysis.services.viral_analysis import _extract_keywords
+from clips.viral_engine.expansion import expand_window
+from clips.viral_engine.profiles import get_profile
+from clips.viral_engine.scoring import score_segment
 
 
 def gpu_cleanup():
@@ -240,91 +244,67 @@ def transcribe_with_words(video_path: str, language: str = "auto") -> dict:
 
     return {"segments": segments}
 
-def pick_viral_windows(transcript: dict, min_s=18, max_s=40, top_k=6) -> list[dict]:
+MIN_GAP_BETWEEN_CLIPS = 60.0  # Evita clips muito grudados
+def pick_viral_windows(transcript: dict, min_s=8, max_s=20, top_n=5, profile="podcast") -> list[dict]:
     """
-    Heurística simples (MVP):
-      - cria janelas por blocos de segmentos
-      - score = densidade de palavras + presença de "hook words"
+    Motor Viral Pro:
+    1. Pontua cada segmento usando hooks e arquétipos.
+    2. Identifica 'âncoras' (momentos de pico).
+    3. Expande a janela para trás (contexto) e para frente (conclusão).
     """
-    hook_words = [
-        "olha", "presta", "atenção", "ninguém", "segredo", "erro", "fácil", "rápido", "dinheiro",
-        "listen", "look", "attention", "nobody", "secret", "mistake", "easy", "fast", "money",
-    ]
-
-    segs = transcript["segments"]
-    if not segs:
+    segments = transcript.get("segments", [])
+    if not segments:
         return []
 
-    # Pré-cálculo: tokens e hook hits por segmento
-    meta = []
-    for s in segs:
-        text = s["text"].lower()
-        tokens = re.findall(r"\w+", text)
-        hooks = sum(1 for hw in hook_words if hw in text)
-        meta.append({
-            "start": s["start"],
-            "end": s["end"],
-            "text": s["text"],
-            "tokens": len(tokens),
+    profile_data = get_profile(profile)
+
+    # 1. Pontuar todos os segmentos
+    scored_segments = []
+    for i, seg in enumerate(segments):
+        score, hooks = score_segment(seg, profile_data)
+        scored_segments.append({
+            "index": i,
+            "start": seg["start"],
+            "end": seg["end"],
+            "score": score,
             "hooks": hooks,
+            "text": seg["text"]
         })
 
+    # 2. Rankear por score para achar as melhores âncoras
+    anchors = sorted(scored_segments, key=lambda x: x["score"], reverse=True)
+
     picks = []
-    i = 0
-    n = len(meta)
-
-    while i < n:
-        # abre janela a partir do i até atingir min_s
-        j = i
-        while j < n and (meta[j]["end"] - meta[i]["start"]) < min_s:
-            j += 1
-
-        # tenta expandir até max_s
-        best = None
-        k = j
-        while k < n and (meta[k]["end"] - meta[i]["start"]) <= max_s:
-            window = meta[i:k+1]
-            dur = window[-1]["end"] - window[0]["start"]
-            if dur < min_s:
-                k += 1
-                continue
-
-            tokens = sum(x["tokens"] for x in window)
-            hooks = sum(x["hooks"] for x in window)
-            score = (tokens / max(dur, 1.0)) + hooks * 1.2  # densidade + hooks
-
-            if best is None or score > best["score"]:
-                best = {
-                    "start": window[0]["start"],
-                    "end": window[-1]["end"],
-                    "score": float(score),
-                    "caption": window[0]["text"][:120],  # caption inicial (você pode melhorar depois)
-                }
-            k += 1
-
-        if best:
-            picks.append(best)
-
-        i += 1
-
-    # remove sobreposições (simples) e pega top_k
-    picks.sort(key=lambda x: x["score"], reverse=True)
-
-    filtered = []
-    for p in picks:
-        overlap = False
-        for f in filtered:
-            if not (p["end"] <= f["start"] or p["start"] >= f["end"]):
-                overlap = True
-                break
-        if not overlap:
-            filtered.append(p)
-        if len(filtered) >= top_k:
+    for anchor in anchors:
+        if len(picks) >= top_n:
             break
 
-    # ordena por tempo para ficar bonito
-    filtered.sort(key=lambda x: x["start"])
-    return filtered
+        # Verificar se esta âncora já está coberta por um clip selecionado
+        # ou se está muito próxima de um clip existente
+        is_too_close = False
+        for p in picks:
+            if abs(anchor["start"] - p["start"]) < MIN_GAP_BETWEEN_CLIPS:
+                is_too_close = True
+                break
+
+        if is_too_close:
+            continue
+
+        # 3. Expandir a janela ao redor da âncora (Expansion Logic)
+        # Passamos a âncora para garantir que o clip comece com o Hook
+        window = expand_window(
+            segments=scored_segments,
+            anchor_idx=anchor["index"],
+            min_s=min_s,
+            max_s=max_s
+        )
+
+        if window:
+            picks.append(window)
+
+    # Ordenar por tempo de início
+    picks.sort(key=lambda x: x["start"])
+    return picks
 
 
 def pick_viral_windows_rich(transcript: dict, min_s=18, max_s=40, top_k=6) -> list[dict]:
@@ -632,12 +612,19 @@ def make_vertical_clip_with_captions(
     subtitle_path: str,
     media_root: Path,
     clip_id: str,
+    output_path: Optional[Path] = None,  # <--- novo parâmetro opcional
 ) -> tuple[str, str]:
 
-    out_dir = media_root / "videos" / "clips"
-    ensure_dir(out_dir)
+    # diretório padrão, caso nenhum output_path seja passado
+    default_out_dir = media_root / "videos" / "clips"
 
-    out_mp4 = out_dir / f"{clip_id}.mp4"
+    if output_path is not None:
+        out_mp4 = Path(output_path)
+        # garante que o diretório do output_path existe
+        ensure_dir(out_mp4.parent)
+    else:
+        ensure_dir(default_out_dir)
+        out_mp4 = default_out_dir / f"{clip_id}.mp4"
 
     sub_path = subtitle_path.replace("\\", "/").replace(":", "\\:")
 
@@ -713,11 +700,10 @@ def make_vertical_clip_with_captions(
         print("[RENDER] ⚠️ fallback render retry")
         subprocess.check_call(fallback_cmd)
 
-    # caption simples (opcional, pode vir de outro lugar)
+    # caption simples (por enquanto vazio – ainda pode ser preenchido em quem chama)
     caption = ""
 
     return str(out_mp4), caption
-
 
 def make_vertical_clip_with_focus(
     video_path: str,

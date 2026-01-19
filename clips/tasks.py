@@ -25,7 +25,7 @@ from .models import (
 from .services import (
     download_video,
     transcribe_with_words_to_file,
-    FFMPEG_BIN, pick_viral_windows_rich,
+    FFMPEG_BIN, pick_viral_windows_rich, pick_viral_windows,
 )
 from .services.clip_service import generate_clips
 from .tasks_clips import render_clip, finalize_job
@@ -755,6 +755,181 @@ def pick_and_render(self, job_id: int):
         update_job_step(job.id, "render", "failed", message=str(e))
         raise
 
+
+@shared_task(bind=True)
+def generate_viral_clips(self, job_id: int, profile: str = "podcast"):
+    """
+    Gera clips virais automáticos usando window_picker + viral hooks
+    """
+    job = VideoJob.objects.get(id=job_id)
+    media_root = Path(settings.MEDIA_ROOT)
+
+    try:
+        ensure_job_steps(job)
+        update_job_step(job.id, "download", "running")
+        job.status = "downloading"
+        job.save(update_fields=["status"])
+
+        video_path, title = download_video(job.url, media_root, job.source)
+        job.original_path = video_path
+        job.title = title or job.title
+        job.save(update_fields=["original_path", "title"])
+        update_job_step(job.id, "download", "done")
+
+        update_job_step(job.id, "transcription", "running")
+        job.status = "transcribing"
+        job.save(update_fields=["status"])
+
+        transcript_path = media_root / "transcripts" / f"{job.id}.json"
+        transcript_path.parent.mkdir(exist_ok=True)
+        transcribe_with_words_to_file(
+            job.original_path,
+            str(transcript_path),
+            language=job.language,
+            modelo=job,
+        )
+
+        job.transcript_path = str(transcript_path)
+        job.save(update_fields=["transcript_path"])
+        update_job_step(job.id, "transcription", "done")
+
+        transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
+
+        # 🔥 AQUI USA O WINDOW_PICKER COM VIRAL HOOKS
+
+        windows = pick_viral_windows(
+            transcript=transcript,
+            min_s=8,
+            max_s=20,
+            top_n=5,
+            profile=profile,  # ou job.video_profile se você adicionar no model
+        )
+
+        if not windows:
+            raise ValueError("Nenhum clip viral encontrado")
+
+        # Extrai janelas de tempo para detecção de faces
+        time_windows = [(w["start"], w["end"]) for w in windows]
+        max_window_seconds = max((end - start) for start, end in time_windows)
+
+        clip_dir = media_root / "clips" / str(job.id)
+        clip_dir.mkdir(parents=True, exist_ok=True)
+
+        # DETECÇÃO DE FACES (igual você já faz)
+        update_job_step(job.id, "faces", "running")
+        fps_sample = _select_fps_sample(max_window_seconds)
+        faces = []
+        faces_smooth = []
+        cache_path = _faces_cache_path_for_job(media_root, job.id)
+        cache_payload = _load_faces_window_cache(
+            cache_path,
+            job.original_path,
+            fps_sample,
+            time_windows,
+        )
+        cache_used = False
+        if cache_payload:
+            faces = cache_payload.get("faces", [])
+            faces_smooth = cache_payload.get("faces_smooth", [])
+            cache_used = True
+            print(
+                "[FACES] ✅ cache hit "
+                f"fps_sample={fps_sample} frames={_estimate_frames_processed(faces)}"
+            )
+
+        if not faces:
+            t0 = time.time()
+            windowed = False
+            try:
+                faces, windowed = _detect_faces_in_windows(
+                    job.original_path,
+                    time_windows,
+                    fps_sample,
+                    clip_dir / "faces_windows_tmp",
+                )
+            except Exception:
+                faces = detect_faces(job.original_path, fps_sample=fps_sample)
+            t1 = time.time()
+            print(
+                "[FACES] detect_faces "
+                f"fps_sample={fps_sample} "
+                f"frames={_estimate_frames_processed(faces)} "
+                f"t={t1 - t0:.2f}s "
+                f"cache={cache_used} "
+                f"windowed={windowed}"
+            )
+
+        if not faces_smooth:
+            t0 = time.time()
+            faces_smooth = _smooth_faces_windowed(faces, time_windows, alpha=0.75)
+            t1 = time.time()
+            print(
+                "[FACES] smooth_faces "
+                f"fps_sample={fps_sample} "
+                f"frames={_estimate_frames_processed(faces)} "
+                f"t={t1 - t0:.2f}s "
+                f"cache={cache_used}"
+            )
+
+        if faces and faces_smooth:
+            payload = _build_faces_cache_payload(
+                job.original_path,
+                fps_sample,
+                time_windows,
+                faces,
+                faces_smooth,
+            )
+            _save_faces_window_cache(cache_path, payload)
+
+        faces_tracked = track_faces(faces_smooth) if faces_smooth else []
+
+        faces_tracked_path = clip_dir / "faces_tracked.json"
+        with open(faces_tracked_path, "w", encoding="utf-8") as f:
+            json.dump(faces_tracked, f, ensure_ascii=False, indent=2)
+
+        frame_w, frame_h = _get_video_frame_size(job.original_path)
+        focus_timeline = build_focus_timeline(
+            faces_tracked=faces_tracked,
+            transcript=transcript,
+            frame_w=frame_w,
+            frame_h=frame_h,
+        )
+        focus_path = clip_dir / "focus_timeline.json"
+        with open(focus_path, "w", encoding="utf-8") as f:
+            json.dump(focus_timeline, f, indent=2)
+        update_job_step(job.id, "faces", "done")
+
+        job.status = "clipping"
+        job.save(update_fields=["status"])
+        update_job_step(job.id, "render", "running")
+
+        # 🎯 AQUI PASSA OS NOVOS PARÂMETROS anchor_start e anchor_end
+        clip_tasks = []
+        for win in windows:
+            clip_tasks.append(
+                render_clip.s(
+                    job_id=job.id,
+                    video_path=job.original_path,
+                    transcript=transcript,
+                    start=win["start"],
+                    end=win["end"],
+                    score=win.get("score", 0.0),
+                    role=win.get("role"),
+                    anchor_start=win.get("anchor_start"),  # ← NOVO
+                    anchor_end=win.get("anchor_end"),  # ← NOVO
+                ).set(queue="clips_cpu")
+            )
+
+        chord(clip_tasks)(
+            finalize_job.s(job.id).set(queue="clips_cpu")
+        )
+
+    except Exception as e:
+        fail_running_steps(job.id, message=str(e))
+        job.status = "error"
+        job.error = str(e)
+        job.save(update_fields=["status", "error"])
+        raise
 
 @shared_task(bind=True)
 def generate_clip_from_blueprint(self, job_id: int, blueprint_path: str):

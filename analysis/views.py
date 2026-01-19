@@ -6,7 +6,7 @@ from django.shortcuts import redirect, render
 
 from clips.models import VideoJob
 from clips.services import detect_source
-from clips.tasks import generate_clip_from_blueprint
+from clips.tasks import generate_clip_from_blueprint, generate_viral_clips
 
 from .services.viral_analysis import build_analysis
 
@@ -41,7 +41,31 @@ def generate_clip(request):
 
     url = request.POST.get("url", "").strip()
     idea = request.POST.get("idea", "").strip()
+    mode = request.POST.get("mode", "manual").strip()  # "manual" ou "viral"
+    profile = request.POST.get("profile", "podcast").strip()
 
+    if not url:
+        return redirect("analysis_page")
+
+    source = detect_source(url)
+    job = VideoJob.objects.create(
+        url=url,
+        language="auto",
+        status="pending",
+        title=idea[:255] or "Clip Viral",
+        source=source,
+    )
+
+    # 🔥 MODO VIRAL (automático com hooks)
+    if mode == "viral":
+        generate_viral_clips.apply_async(
+            args=[job.id],
+            kwargs={"profile": profile},
+            queue="clips_cpu",
+        )
+        return redirect("job_detail", job_id=job.id)
+
+    # 📝 MODO MANUAL (blueprint)
     blueprint = {
         "opening": request.POST.get("opening", "").strip(),
         "setup": request.POST.get("setup", "").strip(),
@@ -51,17 +75,8 @@ def generate_clip(request):
         "ending": request.POST.get("ending", "").strip(),
     }
 
-    if not url or not blueprint["opening"]:
+    if not blueprint["opening"]:
         return redirect("analysis_page")
-
-    source = detect_source(url)
-    job = VideoJob.objects.create(
-        url=url,
-        language="auto",
-        status="pending",
-        title=idea[:255],
-        source=source,
-    )
 
     clip_dir = Path(settings.MEDIA_ROOT) / "clips" / str(job.id)
     clip_dir.mkdir(parents=True, exist_ok=True)

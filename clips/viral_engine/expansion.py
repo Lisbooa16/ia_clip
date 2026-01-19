@@ -1,66 +1,81 @@
-def expand_window(segs, idx, min_s, max_s, force_start=None):
-    # anchor
-    start = force_start if force_start is not None else segs[idx]["start"]
-    end = segs[idx]["end"]
+def expand_window(segments, anchor_idx, min_s=8, max_s=20):
+    """
+    Expande a janela ao redor da âncora (momento viral).
+    Retorna um dict com start, end, anchor_start, anchor_end, score, hooks, caption.
+    """
+    if not segments or anchor_idx >= len(segments):
+        return None
 
-    # tenta puxar um segmento anterior (contexto) se couber
-    if idx > 0:
-        prev_start = segs[idx - 1]["start"]
-        if end - prev_start <= max_s:
-            start = prev_start
+    anchor = segments[anchor_idx]
 
-    # expande pra frente até max_s
-    j = idx + 1
-    while j < len(segs) and end - start < max_s:
-        end_candidate = segs[j]["end"]
-        if end_candidate - start > max_s:
+    # Começar pela âncora
+    left = anchor_idx
+    right = anchor_idx
+
+    # Expandir para trás (contexto) - até 2-3 segundos antes
+    while left > 0:
+        prev_seg = segments[left - 1]
+        if anchor["start"] - prev_seg["start"] > 3.0:  # Máximo 3s de contexto
             break
-        end = end_candidate
-        j += 1
+        left -= 1
 
-    if end - start < min_s:
-        return None, None
+    # Expandir para frente até atingir min_s
+    while right < len(segments) - 1:
+        window_dur = segments[right]["end"] - segments[left]["start"]
+        if window_dur >= min_s:
+            break
+        right += 1
 
-    return start, end
+    # Tentar expandir mais até max_s se melhorar o score
+    best_right = right
+    best_score = sum(s["score"] for s in segments[left:right + 1])
+
+    while right < len(segments) - 1:
+        window_dur = segments[right + 1]["end"] - segments[left]["start"]
+        if window_dur > max_s:
+            break
+
+        right += 1
+        current_score = sum(s["score"] for s in segments[left:right + 1])
+        if current_score > best_score:
+            best_score = current_score
+            best_right = right
+
+    right = best_right
+
+    # Construir a janela final
+    window_segments = segments[left:right + 1]
+
+    # Coletar todos os hooks detectados
+    all_hooks = []
+    for seg in window_segments:
+        all_hooks.extend(seg.get("hooks", []))
+
+    return {
+        "start": window_segments[0]["start"],
+        "end": window_segments[-1]["end"],
+        "anchor_start": anchor["start"],  # ← IMPORTANTE
+        "anchor_end": anchor["end"],  # ← IMPORTANTE
+        "score": best_score,
+        "hooks": list(set(all_hooks)),  # Remove duplicatas
+        "caption": generate_hook_caption(window_segments, all_hooks),
+    }
 
 
-def generate_hook_caption(anchor_text: str, hooks: list = None):
+def generate_hook_caption(segments, hooks):
     """
-    Gera uma legenda viral baseada nos hooks detectados.
+    Gera uma caption viral baseada nos hooks detectados.
+    Prioriza o texto da âncora (primeiro segmento com hook).
     """
-    text = anchor_text.lower()
-    hooks = hooks or []
+    if not segments:
+        return ""
 
-    # Prioridade por tipo de hook detectado
-    if any("fraud" in h for h in hooks):
-        return "CUIDADO COM ESSE GOLPE! ⚠️"
+    # Se temos hooks, usar o texto do segmento que contém o hook mais forte
+    if hooks:
+        for seg in segments:
+            seg_hooks = seg.get("hooks", [])
+            if any(h in seg_hooks for h in hooks):
+                return seg["text"][:120].strip()
 
-    if any("money" in h for h in hooks):
-        return "COMO FAZER DINHEIRO ASSIM 💸"
-
-    if any("drama" in h for h in hooks):
-        return "ISSO FOI EXPOSTO... 😱"
-
-    if any("curiosity" in h for h in hooks):
-        return "O QUE NINGUÉM TE CONTA..."
-
-    if any("urgency" in h for h in hooks):
-        return "ÚLTIMA CHANCE! ⏰"
-
-    if any("social_proof" in h for h in hooks):
-        return "TODO MUNDO TÁ VENDO ISSO 🔥"
-
-    if any("clickbait" in h for h in hooks):
-        return "VOCÊ NÃO VAI ACREDITAR 😳"
-
-    # Fallback para palavras-chave no texto
-    if any(w in text for w in ["quase", "merda", "morrer", "perigo"]):
-        return "ISSO QUASE DEU MUITO ERRADO 😳"
-
-    if any(w in text for w in ["ninguém", "nunca", "jamais"]):
-        return "NINGUÉM FALA SOBRE ISSO…"
-
-    if any(w in text for w in ["erro", "falha", "problema"]):
-        return "ERA SÓ UM ERRO PRA ACABAR TUDO"
-
-    return "OLHA ISSO 👀"
+    # Fallback: usar o primeiro segmento
+    return segments[0]["text"][:120].strip()
