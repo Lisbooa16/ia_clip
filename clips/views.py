@@ -25,7 +25,15 @@ def home(request):
     return render(request, "clips/home.html", {"jobs": jobs})
 
 def publishing_guide(request):
-    return render(request, "clips/publishing.html")
+    publishing = settings.SOCIAL_PUBLISHING
+    status = {
+        platform: {
+            "configured": bool(cfg.get("client_id") and cfg.get("client_secret")),
+            "note": cfg.get("note", ""),
+        }
+        for platform, cfg in publishing.items()
+    }
+    return render(request, "clips/publishing.html", {"publishing_status": status})
 
 def job_detail(request, job_id):
     job = get_object_or_404(VideoJob, id=job_id)

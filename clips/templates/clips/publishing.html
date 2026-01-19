@@ -177,6 +177,39 @@
     </div>
 
     <div class="card">
+      <h2>Status das integrações (ambiente)</h2>
+      <ul>
+        <li>
+          YouTube:
+          {% if publishing_status.youtube.configured %}
+            ✅ configurado
+          {% else %}
+            ❌ faltando <code>YOUTUBE_CLIENT_ID</code> ou <code>YOUTUBE_CLIENT_SECRET</code>
+          {% endif %}
+          — {{ publishing_status.youtube.note }}
+        </li>
+        <li>
+          Instagram:
+          {% if publishing_status.instagram.configured %}
+            ✅ configurado
+          {% else %}
+            ❌ faltando <code>META_APP_ID</code> ou <code>META_APP_SECRET</code>
+          {% endif %}
+          — {{ publishing_status.instagram.note }}
+        </li>
+        <li>
+          TikTok:
+          {% if publishing_status.tiktok.configured %}
+            ✅ configurado
+          {% else %}
+            ❌ faltando <code>TIKTOK_CLIENT_KEY</code> ou <code>TIKTOK_CLIENT_SECRET</code>
+          {% endif %}
+          — {{ publishing_status.tiktok.note }}
+        </li>
+      </ul>
+    </div>
+
+    <div class="card">
       <h2>Como habilitar “postar tudo de uma vez”</h2>
       <ul>
         <li>Crie um formulário para selecionar plataformas e preencher título/legenda/hashtags.</li>
