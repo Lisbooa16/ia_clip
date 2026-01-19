@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <title>Publicação Multiplataforma • Clipper AI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #020617;
+      --border: #1e293b;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --primary: #22c55e;
+      --warning: #f97316;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(circle at top, #020617, #020617);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 32px 16px;
+    }
+
+    .app {
+      max-width: 960px;
+      margin: 0 auto;
+    }
+
+    header {
+      margin-bottom: 24px;
+    }
+
+    header h1 {
+      margin: 0 0 8px;
+      font-size: 26px;
+    }
+
+    header p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.4);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+    }
+
+    ul {
+      padding-left: 18px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #1f2937;
+      color: var(--muted);
+      border: 1px solid #243042;
+      margin-bottom: 10px;
+    }
+
+    .cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: linear-gradient(135deg, #22c55e, #16a34a);
+      color: #052e16;
+      padding: 10px 16px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    .warning {
+      color: #fed7aa;
+      background: #2b190f;
+      border: 1px solid #7c2d12;
+      padding: 12px;
+      border-radius: 10px;
+      font-size: 13px;
+    }
+
+    .flow {
+      display: grid;
+      gap: 10px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    .flow strong {
+      color: var(--text);
+    }
+
+    footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 24px;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Publicação em TikTok, Instagram e YouTube</h1>
+      <p>Guia rápido para postar os clips gerados em todas as plataformas de uma só vez.</p>
+    </header>
+
+    <div class="card">
+      <div class="tag">✅ Caminho recomendado</div>
+      <h2>Fluxo básico de publicação</h2>
+      <div class="flow">
+        <div><strong>1.</strong> Criar integrações oficiais (OAuth) para cada rede.</div>
+        <div><strong>2.</strong> Salvar tokens + refresh em um cofre seguro (ex.: Vault ou banco com criptografia).</div>
+        <div><strong>3.</strong> Enfileirar um job de publicação por plataforma.</div>
+        <div><strong>4.</strong> Monitorar status e registrar URLs finais dos posts.</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="tag">YouTube</div>
+        <h2>Upload oficial</h2>
+        <ul>
+          <li>Use a <strong>YouTube Data API</strong> com o escopo <code>youtube.upload</code>.</li>
+          <li>Configure canal e playlist padrão para Shorts.</li>
+          <li>Envie título, descrição e tags programaticamente.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="tag">Instagram</div>
+        <h2>Reels via Graph API</h2>
+        <ul>
+          <li>Conta precisa ser <strong>Business/Creator</strong> e conectada ao Meta.</li>
+          <li>Use o endpoint <strong>content publishing</strong> para Reels.</li>
+          <li>Requer aprovação e limites de taxa.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="tag">TikTok</div>
+        <h2>Content Posting API</h2>
+        <ul>
+          <li>Necessita aprovação da <strong>TikTok for Developers</strong>.</li>
+          <li>Use o fluxo de upload + publish para vídeos curtos.</li>
+          <li>Mapeie categorias e legendas antes de publicar.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Status das integrações (ambiente)</h2>
+      <ul>
+        <li>
+          YouTube:
+          {% if publishing_status.youtube.configured %}
+            ✅ configurado
+          {% else %}
+            ❌ faltando <code>YOUTUBE_CLIENT_ID</code> ou <code>YOUTUBE_CLIENT_SECRET</code>
+          {% endif %}
+          — {{ publishing_status.youtube.note }}
+        </li>
+        <li>
+          Instagram:
+          {% if publishing_status.instagram.configured %}
+            ✅ configurado
+          {% else %}
+            ❌ faltando <code>META_APP_ID</code> ou <code>META_APP_SECRET</code>
+          {% endif %}
+          — {{ publishing_status.instagram.note }}
+        </li>
+        <li>
+          TikTok:
+          {% if publishing_status.tiktok.configured %}
+            ✅ configurado
+          {% else %}
+            ❌ faltando <code>TIKTOK_CLIENT_KEY</code> ou <code>TIKTOK_CLIENT_SECRET</code>
+          {% endif %}
+          — {{ publishing_status.tiktok.note }}
+        </li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Como habilitar “postar tudo de uma vez”</h2>
+      <ul>
+        <li>Crie um formulário para selecionar plataformas e preencher título/legenda/hashtags.</li>
+        <li>Ao clicar em “Publicar”, dispare um job por plataforma em paralelo.</li>
+        <li>Exiba na tela o status (enfileirado, enviando, publicado, erro).</li>
+        <li>Salve o link final de cada post no histórico do job.</li>
+      </ul>
+    </div>
+
+    <div class="card warning">
+      ⚠️ Cada rede social exige autenticação oficial e aprovação. Não é permitido fazer upload
+      por scraping. Use APIs oficiais para manter sua conta segura e evitar bloqueios.
+    </div>
+
+    <div class="card">
+      <a class="cta" href="/">Voltar para o app</a>
+    </div>
+
+    <footer>
+      Clipper AI • Guia de publicação multiplataforma
+    </footer>
+  </div>
+</body>
+</html>

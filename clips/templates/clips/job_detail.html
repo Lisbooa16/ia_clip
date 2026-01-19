@@ -157,6 +157,78 @@
       margin-top: 6px;
     }
 
+    .publish-form {
+      margin-top: 10px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .publish-form label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .publish-form input,
+    .publish-form textarea {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #0b1220;
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .publish-form textarea {
+      min-height: 70px;
+      resize: vertical;
+    }
+
+    .publish-button {
+      background: #dc2626;
+      color: #fff7ed;
+      border: none;
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .publish-button[disabled] {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .publish-status {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .messages {
+      display: grid;
+      gap: 10px;
+    }
+
+    .message {
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 13px;
+      border: 1px solid transparent;
+    }
+
+    .message.success {
+      background: #14532d;
+      border-color: #166534;
+      color: #dcfce7;
+    }
+
+    .message.error {
+      background: #3f1d1d;
+      border-color: #7f1d1d;
+      color: #fecaca;
+    }
+
     .clip-actions a {
       flex: 1;
       text-align: center;
@@ -296,6 +368,14 @@
       </div>
     </div>
 
+    {% if messages %}
+      <div class="card messages">
+        {% for message in messages %}
+          <div class="message {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
     <div class="card progress-card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <h3 style="margin:0;">Progresso</h3>
@@ -362,6 +442,45 @@
                     </button>
                   </form>
                 </div>
+
+                <form method="post"
+                      action="{% url 'publish_clip_youtube' c.id %}"
+                      class="publish-form">
+                  {% csrf_token %}
+                  <div>
+                    <label for="title-{{ c.id }}">Título do YouTube</label>
+                    <input id="title-{{ c.id }}"
+                           name="title"
+                           required
+                           placeholder="Ex: O momento mais tenso do vídeo" />
+                  </div>
+                  <div>
+                    <label for="description-{{ c.id }}">Descrição</label>
+                    <textarea id="description-{{ c.id }}"
+                              name="description"
+                              placeholder="Inclua hashtags e CTA para Shorts"></textarea>
+                  </div>
+                  <button type="submit"
+                          class="publish-button"
+                          {% if not youtube_ready %}disabled{% endif %}>
+                    🚀 Publicar no YouTube
+                  </button>
+                  <div class="publish-status">
+                    {% if youtube_ready %}
+                      YouTube conectado • pronto para enfileirar
+                    {% else %}
+                      YouTube não configurado • defina YOUTUBE_CLIENT_ID/SECRET
+                    {% endif %}
+                  </div>
+                  {% if c.latest_publication %}
+                    <div class="publish-status">
+                      Última tentativa: {{ c.latest_publication.status|capfirst }}
+                      {% if c.latest_publication.external_url %}
+                        • <a href="{{ c.latest_publication.external_url }}" target="_blank">Ver</a>
+                      {% endif %}
+                    </div>
+                  {% endif %}
+                </form>
               </div>
             </div>
           {% endfor %}
