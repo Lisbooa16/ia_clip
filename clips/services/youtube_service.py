@@ -19,8 +19,8 @@ def _get_video_path(output_path: str) -> Path:
     return path
 
 
-def _build_credentials() -> Credentials:
-    youtube_cfg = settings.SOCIAL_PUBLISHING.get("youtube", {})
+def _build_credentials(channel_key: str) -> Credentials:
+    youtube_cfg = settings.SOCIAL_PUBLISHING["youtube"]["channels"][channel_key]
     refresh_token = youtube_cfg.get("refresh_token")
     if not refresh_token:
         raise ValueError("YOUTUBE_REFRESH_TOKEN não configurado.")
@@ -36,18 +36,27 @@ def _build_credentials() -> Credentials:
     return creds
 
 
-def upload_clip_publication(publication: ClipPublication) -> dict:
+def upload_clip_publication(publication: ClipPublication, channel_key: str, publish_at: str | None = None,) -> dict:
     video_path = _get_video_path(publication.clip.output_path)
     if not video_path.exists():
         raise FileNotFoundError(f"Arquivo não encontrado: {video_path}")
 
-    creds = _build_credentials()
+    creds = _build_credentials(channel_key)
     youtube = build("youtube", "v3", credentials=creds)
 
-    privacy_status = settings.SOCIAL_PUBLISHING.get("youtube", {}).get(
-        "privacy_status",
-        "private",
-    )
+    # 👇 status FINAL que vai para a API
+    print(publish_at)
+    if publish_at:
+        status = {
+            "privacyStatus": "private",  # obrigatório para agendamento
+            "publishAt": publish_at,  # RFC3339 UTC
+        }
+    else:
+        status = {
+            "privacyStatus": settings.SOCIAL_PUBLISHING
+            .get("youtube", {})
+            .get("privacy_status", "private"),
+        }
 
     request = youtube.videos().insert(
         part="snippet,status",
@@ -57,7 +66,7 @@ def upload_clip_publication(publication: ClipPublication) -> dict:
                 "description": publication.description,
                 "categoryId": "22",
             },
-            "status": {"privacyStatus": privacy_status},
+            "status": status,
         },
         media_body=MediaFileUpload(str(video_path), resumable=True),
     )

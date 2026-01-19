@@ -131,9 +131,20 @@ CELERY_TASK_SOFT_TIME_LIMIT = 55 * 60
 
 SOCIAL_PUBLISHING = {
     "youtube": {
-        "client_id": '6270987822-5qle9rv88ttmiii9s66kdokm7voh36sr.apps.googleusercontent.com',
-        "client_secret": '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',
-        "refresh_token": '1//0hk53ZUehMbWtCgYIARAAGBESNwF-L9Irq9svXzuA2Q5EXcRaK8pKp6NW7hHD2x3rwjUdOG6ALc4HAnoMwq50VA2bUdO4fP3oGMA',
-        "note": "OAuth obrigatório (não existe upload só com API key).",
+        "channels": {
+            "canal_principal": {
+                "client_id": '6270987822-5qle9rv88ttmiii9s66kdokm7voh36sr.apps.googleusercontent.com',
+                "client_secret": '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',
+                "refresh_token": '1//0hk53ZUehMbWtCgYIARAAGBESNwF-L9Irq9svXzuA2Q5EXcRaK8pKp6NW7hHD2x3rwjUdOG6ALc4HAnoMwq50VA2bUdO4fP3oGMA',
+                "note": "OAuth obrigatório (não existe upload só com API key).",
+            },
+            "canal_bbb": {
+                "client_id": "6270987822-5qle9rv88ttmiii9s66kdokm7voh36sr.apps.googleusercontent.com",
+                "client_secret": "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",
+                "refresh_token": "1//0huwQ2xV2p2WECgYIARAAGBESNwF-L9IrRXZg80jP2LgY146jz6SzwE1_qhEkUPeHQXm-HUyiPSW64uhUYsngMvNYCe5fM_D7pIs",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "scopes": ["https://www.googleapis.com/auth/youtube.upload"],
+            }
+        }
     },
 }

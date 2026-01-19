@@ -448,6 +448,18 @@
                       class="publish-form">
                   {% csrf_token %}
                   <div>
+                    <label>Canal do YouTube</label>
+                    <select name="youtube_channel"
+                            required
+                            style="width:100%;padding:8px 10px;border-radius:8px;
+                                   border:1px solid var(--border);
+                                   background:#0b1220;color:var(--text);font-size:13px;">
+                      <option value="">Selecione o canal</option>
+                      <option value="canal_principal">Canal Principal</option>
+                      <option value="canal_bbb">Canal BBB</option>
+                    </select>
+                  </div>
+                  <div>
                     <label for="title-{{ c.id }}">Título do YouTube</label>
                     <input id="title-{{ c.id }}"
                            name="title"
@@ -459,6 +471,14 @@
                     <textarea id="description-{{ c.id }}"
                               name="description"
                               placeholder="Inclua hashtags e CTA para Shorts"></textarea>
+                  </div>
+                  <div>
+                    <label>Agendar publicação (opcional)</label>
+                    <input type="datetime-local"
+                           name="publish_at"
+                           style="width:100%;padding:8px 10px;border-radius:8px;
+                                  border:1px solid var(--border);
+                                  background:#0b1220;color:var(--text);font-size:13px;">
                   </div>
                   <button type="submit"
                           class="publish-button"

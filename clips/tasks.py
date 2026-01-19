@@ -1093,14 +1093,18 @@ def generate_clip_from_blueprint(self, job_id: int, blueprint_path: str):
         raise
 
 @shared_task(bind=True)
-def publish_clip_to_youtube(self, publication_id: int):
+def publish_clip_to_youtube(self, publication_id: int, channel_key: str, publish_at=None):
     publication = ClipPublication.objects.select_related("clip").get(id=publication_id)
     publication.status = "publishing"
     publication.error = ""
     publication.save(update_fields=["status", "error"])
 
     try:
-        result = upload_clip_publication(publication)
+        result = upload_clip_publication(
+            publication,
+            channel_key=channel_key,
+            publish_at=publish_at,
+        )
         publication.status = "published"
         publication.external_url = result.get("url", "")
         publication.save(update_fields=["status", "external_url"])

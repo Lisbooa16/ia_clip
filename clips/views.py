@@ -10,6 +10,10 @@ from .models import ClipPublication, VideoJob, VideoClip, get_job_progress
 from .services import make_vertical_clip_with_captions
 from .tasks import process_video_job, publish_clip_to_youtube
 
+from django.utils.dateparse import parse_datetime
+from django.utils.timezone import make_aware, get_current_timezone
+from datetime import timezone
+
 def home(request):
     if request.method == "POST":
         url = request.POST.get("url", "").strip()
@@ -50,6 +54,7 @@ def job_detail(request, job_id):
     youtube_ready = bool(
         youtube_cfg.get("client_id") and youtube_cfg.get("client_secret")
     )
+    youtube_ready = True
     for clip in job.clips.all():
         clip.latest_publication = clip.publications.order_by("-created_at").first()
     return render(
@@ -146,19 +151,23 @@ def publish_clip_youtube(request, clip_id):
 
     title = request.POST.get("title", "").strip()
     description = request.POST.get("description", "").strip()
+    youtube_channel = request.POST.get("youtube_channel")
+    publish_at_raw = request.POST.get("publish_at")
 
     if not title:
         messages.error(request, "Informe um título para publicar no YouTube.")
         return redirect("job_detail", job_id=job.id)
 
-    youtube_cfg = settings.SOCIAL_PUBLISHING.get("youtube", {})
-    if not (youtube_cfg.get("client_id") and youtube_cfg.get("client_secret")):
-        messages.error(
-            request,
-            "Integração do YouTube não configurada. Defina YOUTUBE_CLIENT_ID e "
-            "YOUTUBE_CLIENT_SECRET no ambiente.",
-        )
+    channels = settings.SOCIAL_PUBLISHING.get("youtube", {}).get("channels", {})
+    if youtube_channel not in channels:
+        messages.error(request, "Canal do YouTube inválido.")
         return redirect("job_detail", job_id=job.id)
+
+    publish_at = None
+    if publish_at_raw:
+        dt = parse_datetime(publish_at_raw)
+        if dt:
+            publish_at = make_aware(dt, get_current_timezone()).astimezone(timezone.utc)
 
     publication = ClipPublication.objects.create(
         clip=clip,
@@ -167,9 +176,15 @@ def publish_clip_youtube(request, clip_id):
         description=description,
         status="queued",
     )
-    publish_clip_to_youtube.apply_async(args=[publication.id], queue="clips_cpu")
+
+    # 👇 PASSA O CANAL DIRETO PRA TASK
+    publish_clip_to_youtube.apply_async(
+        args=[publication.id, youtube_channel, publish_at.isoformat() if publish_at else None],
+        queue="clips_cpu",
+    )
+
     messages.success(
         request,
-        "Solicitação criada. Próximo passo: implementar o upload via YouTube Data API.",
+        f"Publicação enfileirada para o canal: {youtube_channel}",
     )
     return redirect("job_detail", job_id=job.id)
