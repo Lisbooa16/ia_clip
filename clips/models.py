@@ -206,6 +206,31 @@ class VideoClip(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
 
+class ClipPublication(models.Model):
+    STATUS = [
+        ("queued", "Queued"),
+        ("publishing", "Publishing"),
+        ("published", "Published"),
+        ("error", "Error"),
+    ]
+
+    PLATFORM = [
+        ("youtube", "YouTube"),
+    ]
+
+    clip = models.ForeignKey(
+        VideoClip,
+        on_delete=models.CASCADE,
+        related_name="publications",
+    )
+    platform = models.CharField(max_length=20, choices=PLATFORM)
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS, default="queued")
+    external_url = models.URLField(blank=True)
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
 class ClipFeedback(models.Model):
     clip_id = models.CharField(max_length=64)
     creator_id = models.IntegerField()
