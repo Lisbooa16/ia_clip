@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -127,3 +128,21 @@ CELERY_BROKER_URL = "redis://localhost:6379/0"
 CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
 CELERY_TASK_TIME_LIMIT = 60 * 60
 CELERY_TASK_SOFT_TIME_LIMIT = 55 * 60
+
+SOCIAL_PUBLISHING = {
+    "youtube": {
+        "client_id": os.getenv("YOUTUBE_CLIENT_ID", ""),
+        "client_secret": os.getenv("YOUTUBE_CLIENT_SECRET", ""),
+        "note": "OAuth obrigatório (não existe upload só com API key).",
+    },
+    "instagram": {
+        "app_id": os.getenv("META_APP_ID", ""),
+        "app_secret": os.getenv("META_APP_SECRET", ""),
+        "note": "Requer Instagram Graph API com conta Business/Creator.",
+    },
+    "tiktok": {
+        "client_key": os.getenv("TIKTOK_CLIENT_KEY", ""),
+        "client_secret": os.getenv("TIKTOK_CLIENT_SECRET", ""),
+        "note": "Requer aprovação na TikTok for Developers.",
+    },
+}

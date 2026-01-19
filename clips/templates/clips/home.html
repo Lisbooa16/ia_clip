@@ -59,6 +59,39 @@
       box-shadow: 0 10px 30px rgba(0,0,0,.4);
     }
 
+    .cta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .cta h3 {
+      margin: 0 0 6px;
+      font-size: 18px;
+    }
+
+    .cta p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .cta a {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #22c55e, #16a34a);
+      color: #052e16;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
     .form-row {
       display: flex;
       gap: 12px;
@@ -197,6 +230,14 @@
           <button type="submit">Processar</button>
         </div>
       </form>
+    </div>
+
+    <div class="card cta">
+      <div>
+        <h3>Postar em TikTok, Instagram e YouTube</h3>
+        <p>Veja como criar a integração oficial para publicar em todas as redes de uma vez.</p>
+      </div>
+      <a href="{% url 'publishing_guide' %}">Ver guia</a>
     </div>
 
     <div class="card jobs">
