@@ -7,8 +7,8 @@ def generate_clips(transcript, channel_type="youtube_shorts", archetype=None, to
     picks = pick_viral_windows_generic(
         transcript,
         profile,
-        min_s=35,
-        max_s=45,  # Aumentei um pouco o range para dar mais flexibilidade
+        min_s=40,
+        max_s=60,
         top_k=top_k
     )
 
