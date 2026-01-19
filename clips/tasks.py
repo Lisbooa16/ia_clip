@@ -1,4 +1,3 @@
-# clips/tasks.py
 import hashlib
 import json
 import os
@@ -543,33 +542,6 @@ def process_video_job(self, job_id: int):
         job.error = str(e)
         job.save(update_fields=["status", "error"])
         raise
-
-# @shared_task(
-#     bind=True,
-# )
-# def transcribe_video_gpu(self, job_id: int):
-#     job = VideoJob.objects.get(id=job_id)
-#
-#     job.status = "transcribing"
-#     job.save(update_fields=["status"])
-#
-    # transcript = transcribe_with_words(
-    #     job.original_path,
-    #     language=job.language
-    # )
-#     print(f"[JOB {job.id}] Transcript gerado ({len(transcript['segments'])} segmentos)")
-#
-#     job.transcript_data = transcript
-#     job.save(update_fields=["transcript_data"])
-#
-#     print(f"[JOB {job.id}] Transcript salvo")
-#
-#     pick_and_render.apply_async(
-#         args=[job.id],
-#         queue="clips_cpu"
-#     )
-#
-#     print(f"[JOB {job.id}] pick_and_render disparado")
 
 @shared_task(bind=True)
 def transcribe_video_gpu(self, job_id):

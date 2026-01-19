@@ -1,6 +1,4 @@
-# clips/tasks_clips.py
 import json
-import uuid
 import bisect
 import cv2
 import numpy as np

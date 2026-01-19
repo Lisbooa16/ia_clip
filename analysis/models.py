@@ -1,4 +1,3 @@
-# analysis/models.py
 from django.db import models
 
 class VideoAnalysis(models.Model):

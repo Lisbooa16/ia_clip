@@ -123,10 +123,6 @@ def reprocess_clip(request, clip_id):
 
     media_root = Path(settings.MEDIA_ROOT)
 
-    # 🔑 vídeo original SEMPRE vem do job
-    # video_path = media_root / "videos" / "original" / f"{job.original_path}.mp4"
-
-    # transcript você já tem salvo ou pode carregar do JSON
     transcript = job.transcript_data  # veja observação abaixo
 
     out_mp4, caption = make_vertical_clip_with_captions(
