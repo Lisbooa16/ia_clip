@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Cortes Que Não Contam{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="bg-gray-50">
+
+    <header class="bg-gradient-to-r from-purple-600 to-indigo-600 shadow-lg">
+        <div class="container mx-auto px-4 py-4">
+            <div class="flex items-center justify-between">
+                <a href="/" class="flex items-center space-x-2">
+                    <i class="fas fa-video text-white text-2xl"></i>
+                    <span class="text-white text-xl font-bold">Cortes Que Não Contam</span>
+                </a>
+                <nav class="flex items-center space-x-4">
+                    <a href="/" class="text-white hover:text-gray-200">
+                        <i class="fas fa-home mr-1"></i>Início
+                    </a>
+                    <a href="/admin/" class="text-white hover:text-gray-200">
+                        <i class="fas fa-cog mr-1"></i>Admin
+                    </a>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="bg-gray-800 text-white mt-12 py-6">
+        <div class="container mx-auto px-4 text-center">
+            <p>&copy; 2024 Cortes Que Não Contam. Sistema de Clips Virais com IA.</p>
+        </div>
+    </footer>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
