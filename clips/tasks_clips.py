@@ -43,14 +43,18 @@ def render_clip(
 
     try:
         # 1️⃣ LEGENDA (como já fazia)
-        segments = segments_for_clip(transcript["segments"], start, end)
-        segments = fill_gaps(segments)
-        srt_text = to_srt(segments)
-
         subs_dir = media_root / "subs"
         subs_dir.mkdir(parents=True, exist_ok=True)
-        srt_path = subs_dir / f"{clip.id}.srt"
-        srt_path.write_text(srt_text, encoding="utf-8")
+
+        def write_srt_for_range(clip_start, clip_end, suffix=""):
+            segs = segments_for_clip(transcript["segments"], clip_start, clip_end)
+            segs = fill_gaps(segs)
+            srt_text = to_srt(segs)
+            srt_path = subs_dir / f"{clip.id}{suffix}.srt"
+            srt_path.write_text(srt_text, encoding="utf-8")
+            return srt_path
+
+        srt_path = write_srt_for_range(start, end)
 
         # 2️⃣ CARREGA FOCO E FACES
         focus_path = clip_dir / "focus_timeline.json"
@@ -99,6 +103,7 @@ def render_clip(
             HOOK_PREVIEW_MAX_DURATION = 6.0   # duração máx. do replay
             HOOK_PREVIEW_LEAD_IN = 0.5        # segundos antes do anchor_start
             HOOK_PREVIEW_TAIL = 0.5           # segundos depois do anchor_end/anchor_start
+            HOOK_MIN_LEAD_FROM_START = 1.0    # evita repetir o começo do clip
 
             base = anchor_start
             anchor_tail = anchor_end if anchor_end is not None else anchor_start
@@ -109,7 +114,7 @@ def render_clip(
             if preview_end - preview_start > HOOK_PREVIEW_MAX_DURATION:
                 preview_end = preview_start + HOOK_PREVIEW_MAX_DURATION
 
-            if preview_end - preview_start >= 0.7:
+            if preview_end - preview_start >= 0.7 and (preview_start - start) >= HOOK_MIN_LEAD_FROM_START:
                 hook_out = media_root / "tmp" / f"{clip.id}_hook.mp4"
                 hook_out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -120,11 +125,12 @@ def render_clip(
                 )
 
                 # Aqui usamos legenda + corte simples (sem lógica de foco)
+                hook_srt_path = write_srt_for_range(preview_start, preview_end, suffix="_hook")
                 make_vertical_clip_with_captions(
                     video_path=video_path,
                     start=preview_start,
                     end=preview_end,
-                    subtitle_path=str(srt_path),
+                    subtitle_path=str(hook_srt_path),
                     media_root=media_root,
                     clip_id=f"{clip.id}_hook",
                     output_path=hook_out,
