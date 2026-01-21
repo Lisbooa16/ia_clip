@@ -109,6 +109,28 @@
       margin-bottom: 14px;
     }
 
+    .full-video video {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: black;
+    }
+
+    .full-video-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .full-video-actions a {
+      flex: 1;
+      text-align: center;
+      padding: 10px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 14px;
+    }
+
     .clips-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -365,6 +387,14 @@
         <div><b>Idioma</b><br>{{ job.language|upper }}</div>
         <div><b>Título</b><br>{{ job.title|default:"—" }}</div>
         <div><b>Clips gerados</b><br>{{ job.clips.count }}</div>
+        <div>
+          <b>Modo</b><br>
+          {% if job.processing_mode == "full" %}
+            Vídeo completo
+          {% else %}
+            Clips
+          {% endif %}
+        </div>
       </div>
     </div>
 
@@ -394,6 +424,24 @@
       </div>
     {% endif %}
 
+    {% if job.processing_mode == "full" and job.original_path %}
+      <div class="card full-video">
+        <div class="clips-header">
+          <h3>Vídeo completo</h3>
+          {% if job.status != "done" and job.status != "error" %}
+            <span class="progress">Processando… atualiza a cada 3s</span>
+          {% endif %}
+        </div>
+        <video controls preload="metadata">
+          <source src="/media/{{ job.original_path }}" type="video/mp4">
+        </video>
+        <div class="full-video-actions">
+          <a class="download" href="/media/{{ job.original_path }}" download>Download</a>
+          <a class="open" href="/media/{{ job.original_path }}" target="_blank">Abrir</a>
+        </div>
+      </div>
+    {% endif %}
+
     <div class="card">
       <div class="clips-header">
         <h3>Clips</h3>
@@ -402,7 +450,9 @@
         {% endif %}
       </div>
 
-      {% if job.clips.exists %}
+      {% if job.processing_mode == "full" %}
+        <p style="color:var(--muted)">Este job foi configurado para baixar o vídeo completo.</p>
+      {% elif job.clips.exists %}
         <div class="clips-grid">
           {% for c in job.clips.all %}
             <div class="clip">

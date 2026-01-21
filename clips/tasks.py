@@ -523,6 +523,15 @@ def process_video_job(self, job_id: int):
         job.save(update_fields=["original_path", "title"])
         update_job_step(job.id, "download", "done")
 
+        if job.processing_mode == "full":
+            update_job_step(job.id, "faces", "done")
+            update_job_step(job.id, "transcription", "done")
+            update_job_step(job.id, "render", "done")
+            update_job_step(job.id, "finalize", "done")
+            job.status = "done"
+            job.save(update_fields=["status"])
+            return
+
         clip_dir = media_root / "clips" / str(job.id)
         clip_dir.mkdir(parents=True, exist_ok=True)
 
