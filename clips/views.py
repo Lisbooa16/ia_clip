@@ -18,8 +18,14 @@ def home(request):
     if request.method == "POST":
         url = request.POST.get("url", "").strip()
         language = request.POST.get("language", "auto")
+        processing_mode = request.POST.get("processing_mode", "clips")
 
-        job = VideoJob.objects.create(url=url, language=language, status="pending")
+        job = VideoJob.objects.create(
+            url=url,
+            language=language,
+            processing_mode=processing_mode,
+            status="pending",
+        )
         process_video_job.apply_async(
             args=[job.id],
             queue="clips_cpu"
@@ -57,12 +63,16 @@ def job_detail(request, job_id):
     youtube_ready = True
     for clip in job.clips.all():
         clip.latest_publication = clip.publications.order_by("-created_at").first()
+    full_video_clip = None
+    if job.processing_mode == "full":
+        full_video_clip = job.clips.filter(caption="Vídeo completo").order_by("id").first()
     return render(
         request,
         "clips/job_detail.html",
         {
             "job": job,
             "youtube_ready": youtube_ready,
+            "full_video_clip": full_video_clip,
         },
     )
 

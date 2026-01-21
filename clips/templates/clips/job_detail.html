@@ -109,6 +109,28 @@
       margin-bottom: 14px;
     }
 
+    .full-video video {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: black;
+    }
+
+    .full-video-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .full-video-actions a {
+      flex: 1;
+      text-align: center;
+      padding: 10px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 14px;
+    }
+
     .clips-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -364,7 +386,22 @@
         <div><b>Status</b><br>{{ job.status }}</div>
         <div><b>Idioma</b><br>{{ job.language|upper }}</div>
         <div><b>Título</b><br>{{ job.title|default:"—" }}</div>
-        <div><b>Clips gerados</b><br>{{ job.clips.count }}</div>
+        <div>
+          <b>Clips gerados</b><br>
+          {% if job.processing_mode == "full" %}
+            0
+          {% else %}
+            {{ job.clips.count }}
+          {% endif %}
+        </div>
+        <div>
+          <b>Modo</b><br>
+          {% if job.processing_mode == "full" %}
+            Vídeo completo
+          {% else %}
+            Clips
+          {% endif %}
+        </div>
       </div>
     </div>
 
@@ -394,6 +431,84 @@
       </div>
     {% endif %}
 
+    {% if job.processing_mode == "full" and job.original_path %}
+      <div class="card full-video">
+        <div class="clips-header">
+          <h3>Vídeo completo</h3>
+          {% if job.status != "done" and job.status != "error" %}
+            <span class="progress">Processando… atualiza a cada 3s</span>
+          {% endif %}
+        </div>
+        <video controls preload="metadata">
+          <source src="/media/{{ job.original_path }}" type="video/mp4">
+        </video>
+        <div class="full-video-actions">
+          <a class="download" href="/media/{{ job.original_path }}" download>Download</a>
+          <a class="open" href="/media/{{ job.original_path }}" target="_blank">Abrir</a>
+        </div>
+        {% if full_video_clip %}
+          <form method="post"
+                action="{% url 'publish_clip_youtube' full_video_clip.id %}"
+                class="publish-form">
+            {% csrf_token %}
+            <div>
+              <label>Canal do YouTube</label>
+              <select name="youtube_channel"
+                      required
+                      style="width:100%;padding:8px 10px;border-radius:8px;
+                             border:1px solid var(--border);
+                             background:#0b1220;color:var(--text);font-size:13px;">
+                <option value="">Selecione o canal</option>
+                <option value="canal_principal">Canal Principal</option>
+                <option value="canal_bbb">Canal BBB</option>
+              </select>
+            </div>
+            <div>
+              <label for="title-full-{{ job.id }}">Título do YouTube</label>
+              <input id="title-full-{{ job.id }}"
+                     name="title"
+                     required
+                     placeholder="Ex: Episódio completo do podcast" />
+            </div>
+            <div>
+              <label for="description-full-{{ job.id }}">Descrição</label>
+              <textarea id="description-full-{{ job.id }}"
+                        name="description"
+                        placeholder="Inclua hashtags e CTA para o vídeo completo"></textarea>
+            </div>
+            <div>
+              <label>Agendar publicação (opcional)</label>
+              <input type="datetime-local"
+                     name="publish_at"
+                     style="width:100%;padding:8px 10px;border-radius:8px;
+                            border:1px solid var(--border);
+                            background:#0b1220;color:var(--text);font-size:13px;">
+            </div>
+            <button type="submit"
+                    class="publish-button"
+                    {% if not youtube_ready %}disabled{% endif %}>
+              🚀 Publicar no YouTube
+            </button>
+            <div class="publish-status">
+              {% if youtube_ready %}
+                YouTube conectado • pronto para enfileirar
+              {% else %}
+                YouTube não configurado • defina YOUTUBE_CLIENT_ID/SECRET
+              {% endif %}
+            </div>
+            {% if full_video_clip.latest_publication %}
+              <div class="publish-status">
+                Última tentativa: {{ full_video_clip.latest_publication.status|capfirst }}
+                {% if full_video_clip.latest_publication.external_url %}
+                  • <a href="{{ full_video_clip.latest_publication.external_url }}" target="_blank">Ver</a>
+                {% endif %}
+              </div>
+            {% endif %}
+          </form>
+        {% endif %}
+      </div>
+    {% endif %}
+
     <div class="card">
       <div class="clips-header">
         <h3>Clips</h3>
@@ -402,7 +517,9 @@
         {% endif %}
       </div>
 
-      {% if job.clips.exists %}
+      {% if job.processing_mode == "full" %}
+        <p style="color:var(--muted)">Este job foi configurado para baixar o vídeo completo.</p>
+      {% elif job.clips.exists %}
         <div class="clips-grid">
           {% for c in job.clips.all %}
             <div class="clip">
