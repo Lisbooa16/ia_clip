@@ -63,12 +63,16 @@ def job_detail(request, job_id):
     youtube_ready = True
     for clip in job.clips.all():
         clip.latest_publication = clip.publications.order_by("-created_at").first()
+    full_video_clip = None
+    if job.processing_mode == "full":
+        full_video_clip = job.clips.filter(caption="Vídeo completo").order_by("id").first()
     return render(
         request,
         "clips/job_detail.html",
         {
             "job": job,
             "youtube_ready": youtube_ready,
+            "full_video_clip": full_video_clip,
         },
     )
 

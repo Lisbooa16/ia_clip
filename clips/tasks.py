@@ -18,6 +18,7 @@ from .media.face_tracking import track_faces
 from .models import (
     ClipPublication,
     VideoJob,
+    VideoClip,
     ensure_job_steps,
     update_job_step,
     fail_running_steps,
@@ -524,6 +525,16 @@ def process_video_job(self, job_id: int):
         update_job_step(job.id, "download", "done")
 
         if job.processing_mode == "full":
+            VideoClip.objects.get_or_create(
+                job=job,
+                output_path=video_path,
+                defaults={
+                    "start": 0,
+                    "end": 0,
+                    "score": 0,
+                    "caption": "Vídeo completo",
+                },
+            )
             update_job_step(job.id, "faces", "done")
             update_job_step(job.id, "transcription", "done")
             update_job_step(job.id, "render", "done")
