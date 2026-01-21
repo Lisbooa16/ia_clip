@@ -772,8 +772,8 @@ def generate_viral_clips(self, job_id: int, profile: str = "podcast"):
 
         windows = pick_viral_windows(
             transcript=transcript,
-            min_s=8,
-            max_s=20,
+            min_s=18,
+            max_s=40,
             top_n=5,
             profile=profile,  # ou job.video_profile se você adicionar no model
         )
