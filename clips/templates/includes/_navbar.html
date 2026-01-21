@@ -1,18 +1,20 @@
 <style>
-  header {
+  .navbar-header {
     display: flex;
     padding: 1rem 2rem;
   }
 
-  .container {
+  .navbar-container {
     max-width: 1200px;
     margin: 0 auto;
+    width: 100%;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 1.5rem;
   }
 
-  .logo {
+  .navbar-logo {
     display: flex;
     align-items: center;
     color: white;
@@ -22,20 +24,21 @@
     gap: 0.5rem;
   }
 
-  .logo i {
+  .navbar-logo i {
     font-size: 2rem;
   }
 
-  nav {
+  .navbar-nav {
     display: flex;
     gap: 2rem;
+    flex-wrap: wrap;
   }
 
-  nav a {
+  .navbar-nav a {
     color: white;
     text-decoration: none;
     font-weight: 600;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 0.5rem;
     padding: 0.5rem 0.75rem;
@@ -43,29 +46,29 @@
     transition: background-color 0.3s ease;
   }
 
-  nav a:hover {
+  .navbar-nav a:hover {
     background-color: rgba(255, 255, 255, 0.15);
   }
 
   @media (max-width: 768px) {
-    .container {
+    .navbar-container {
       flex-direction: column;
-      gap: 1rem;
+      align-items: flex-start;
     }
 
-    nav {
+    .navbar-nav {
       gap: 1rem;
     }
   }
 </style>
 
-<header>
-  <div class="container">
-    <a href="{% url 'analysis_page' %}" class="logo">
+<header class="navbar-header">
+  <div class="navbar-container">
+    <a href="{% url 'analysis_page' %}" class="navbar-logo">
       <i class="fas fa-video"></i>
       <span>Cortes Que Não Contam</span>
     </a>
-    <nav>
+    <nav class="navbar-nav">
       <a href="{% url 'analysis_page' %}">
         <i class="fas fa-chart-line"></i> Análise
       </a>
