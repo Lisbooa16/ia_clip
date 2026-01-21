@@ -19,10 +19,19 @@ class VideoJob(models.Model):
         ("error", "Error"),
         ("tracking_faces", "Tracking_Faces")
     ]
+    PROCESSING_MODE = [
+        ("clips", "Clips"),
+        ("full", "Full"),
+    ]
 
     url = models.URLField()
     language = models.CharField(max_length=10, default="auto")  # "pt", "en", "auto"
     status = models.CharField(max_length=20, choices=STATUS, default="pending")
+    processing_mode = models.CharField(
+        max_length=10,
+        choices=PROCESSING_MODE,
+        default="clips",
+    )
 
     title = models.CharField(max_length=255, blank=True)
     source = models.CharField(max_length=20, blank=True)  # yt/tt/ig/other

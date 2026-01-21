@@ -18,8 +18,14 @@ def home(request):
     if request.method == "POST":
         url = request.POST.get("url", "").strip()
         language = request.POST.get("language", "auto")
+        processing_mode = request.POST.get("processing_mode", "clips")
 
-        job = VideoJob.objects.create(url=url, language=language, status="pending")
+        job = VideoJob.objects.create(
+            url=url,
+            language=language,
+            processing_mode=processing_mode,
+            status="pending",
+        )
         process_video_job.apply_async(
             args=[job.id],
             queue="clips_cpu"
