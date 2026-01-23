@@ -204,51 +204,16 @@ def get_job_progress(job: VideoJob) -> dict:
     }
 
 class VideoClip(models.Model):
-    CAPTION_STYLE = [
-        ("static", "Static"),
-        ("word_by_word", "Word by word"),
-    ]
-
     job = models.ForeignKey(VideoJob, on_delete=models.CASCADE, related_name="clips")
 
     start = models.FloatField()
     end = models.FloatField()
     score = models.FloatField(default=0)
 
-    original_video_path = models.CharField(max_length=500, blank=True)
-    original_start = models.FloatField(null=True, blank=True)
-    original_end = models.FloatField(null=True, blank=True)
-    edited_start = models.FloatField(null=True, blank=True)
-    edited_end = models.FloatField(null=True, blank=True)
-
-    caption_style = models.CharField(
-        max_length=20,
-        choices=CAPTION_STYLE,
-        default="static",
-    )
-    caption_config = models.JSONField(null=True, blank=True)
-
     caption = models.TextField(blank=True)
     output_path = models.CharField(max_length=500)  # caminho local do clip final
 
     created_at = models.DateTimeField(auto_now_add=True)
-
-    def effective_start(self) -> float:
-        if self.edited_start is not None:
-            return self.edited_start
-        if self.original_start is not None:
-            return self.original_start
-        return self.start
-
-    def effective_end(self) -> float:
-        if self.edited_end is not None:
-            return self.edited_end
-        if self.original_end is not None:
-            return self.original_end
-        return self.end
-
-    def source_video_path(self) -> str:
-        return self.original_video_path or self.job.original_path or ""
 
 class ClipPublication(models.Model):
     STATUS = [
