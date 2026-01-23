@@ -179,6 +179,199 @@
       margin-top: 6px;
     }
 
+    .clip-edit-button {
+      background: #1d4ed8;
+      color: #e0e7ff;
+      border: none;
+      padding: 8px;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      flex: 1;
+    }
+
+    .edit-modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 40;
+    }
+
+    .edit-modal.active {
+      display: flex;
+    }
+
+    .edit-modal .backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.72);
+    }
+
+    .edit-modal .modal-card {
+      position: relative;
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      max-width: 880px;
+      width: min(92vw, 880px);
+      z-index: 1;
+      display: grid;
+      gap: 16px;
+      padding: 20px;
+      box-shadow: 0 24px 80px rgba(15, 23, 42, 0.6);
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .modal-header h4 {
+      margin: 0;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .modal-body {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+      gap: 16px;
+    }
+
+    .edit-player {
+      display: grid;
+      gap: 10px;
+    }
+
+    .edit-player video {
+      width: 100%;
+      aspect-ratio: 9 / 16;
+      border-radius: 12px;
+      background: black;
+    }
+
+    .timeline-controls {
+      display: grid;
+      gap: 8px;
+      background: #0b1220;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px;
+    }
+
+    .timeline-actions {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+
+    .timeline-actions button {
+      padding: 6px 8px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #111827;
+      color: var(--text);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .time-readout {
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .edit-form {
+      display: grid;
+      gap: 10px;
+      background: #0b1220;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+    }
+
+    .edit-form .row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .edit-form label {
+      display: block;
+      font-size: 12px;
+      margin-bottom: 6px;
+      color: var(--muted);
+    }
+
+    .edit-form input,
+    .edit-form select {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #0b1220;
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .edit-form .toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .modal-footer button {
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: none;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .modal-footer .secondary {
+      background: #1f2937;
+      color: var(--text);
+    }
+
+    .modal-footer .primary {
+      background: var(--accent);
+      color: #0b1220;
+    }
+
+    .modal-card .secondary {
+      background: #1f2937;
+      color: var(--text);
+      border: none;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    @media (max-width: 860px) {
+      .modal-body {
+        grid-template-columns: 1fr;
+      }
+    }
+
     .publish-form {
       margin-top: 10px;
       display: grid;
@@ -524,7 +717,7 @@
           {% for c in job.clips.all %}
             <div class="clip">
               <video controls preload="metadata">
-                <source src="/media/{{ c.output_path }}" type="video/mp4">
+                <source src="/media/{{ c.output_path }}?v={{ c.edited_start|default_if_none:'' }}-{{ c.edited_end|default_if_none:'' }}-{{ c.caption_style }}" type="video/mp4">
               </video>
 
               <div class="clip-body">
@@ -543,8 +736,7 @@
                   </a>
 
                   <a class="open"
-                     href="/media/{{ c.output_path }}"
-                     target="_blank">
+                     href="/media/{{ c.output_path }}">
                     Abrir
                   </a>
 
@@ -557,6 +749,135 @@
                             style="width:100%;padding:8px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">
                       🔁 Reprocessar
                     </button>
+                  </form>
+
+                  <button type="button"
+                          class="clip-edit-button"
+                          data-modal-target="edit-modal-{{ c.id }}">
+                    ✂️ Editar
+                  </button>
+                </div>
+
+                <div class="edit-modal" id="edit-modal-{{ c.id }}" aria-hidden="true">
+                  <div class="backdrop" data-modal-close></div>
+                  <form method="post"
+                        action="{% url 'update_clip_edit' c.id %}"
+                        class="modal-card"
+                        data-edit-form="{{ c.id }}">
+                    {% csrf_token %}
+                    <div class="modal-header">
+                      <h4>Editar clip • {{ c.id }}</h4>
+                      <button type="button" class="secondary" data-modal-close>Fechar</button>
+                    </div>
+                    <div class="modal-body">
+                      <div class="edit-player">
+                        <video controls preload="metadata"
+                               data-edit-video="{{ c.id }}">
+                          <source src="/media/{{ c.output_path }}?v={{ c.edited_start|default_if_none:'' }}-{{ c.edited_end|default_if_none:'' }}-{{ c.caption_style }}" type="video/mp4">
+                        </video>
+                        <div class="timeline-controls" data-edit-controls="{{ c.id }}">
+                          <div class="time-readout">
+                            <span>Atual: <strong data-current-time="{{ c.id }}">0.00s</strong></span>
+                            <span>Frame: <strong data-frame-step="{{ c.id }}">1/30</strong></span>
+                          </div>
+                          <div class="timeline-actions">
+                            <button type="button" data-step="-1" data-clip-id="{{ c.id }}">◀ Frame</button>
+                            <button type="button" data-step="1" data-clip-id="{{ c.id }}">Frame ▶</button>
+                            <button type="button" data-set="start" data-clip-id="{{ c.id }}">Marcar início</button>
+                            <button type="button" data-set="end" data-clip-id="{{ c.id }}">Marcar fim</button>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="edit-form">
+                        <div class="row">
+                          <div>
+                            <label for="edited-start-{{ c.id }}">Início (s)</label>
+                            <input id="edited-start-{{ c.id }}"
+                                   name="edited_start"
+                                   type="number"
+                                   step="0.01"
+                                   placeholder="{{ c.start|floatformat:2 }}"
+                                   value="{{ c.edited_start|default_if_none:'' }}"
+                                   data-edit-start="{{ c.id }}">
+                          </div>
+                          <div>
+                            <label for="edited-end-{{ c.id }}">Fim (s)</label>
+                            <input id="edited-end-{{ c.id }}"
+                                   name="edited_end"
+                                   type="number"
+                                   step="0.01"
+                                   placeholder="{{ c.end|floatformat:2 }}"
+                                   value="{{ c.edited_end|default_if_none:'' }}"
+                                   data-edit-end="{{ c.id }}">
+                          </div>
+                        </div>
+                        <div class="row">
+                          <div>
+                            <label for="caption-style-{{ c.id }}">Estilo da legenda</label>
+                            <select id="caption-style-{{ c.id }}" name="caption_style">
+                              <option value="static" {% if c.caption_style == "static" %}selected{% endif %}>Static</option>
+                              <option value="word_by_word" {% if c.caption_style == "word_by_word" %}selected{% endif %}>Word by word</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label for="position-{{ c.id }}">Posição</label>
+                            <select id="position-{{ c.id }}" name="position">
+                              <option value="bottom" {% if not c.caption_config or c.caption_config.position == "bottom" %}selected{% endif %}>Bottom</option>
+                              <option value="center" {% if c.caption_config.position == "center" %}selected{% endif %}>Center</option>
+                              <option value="top" {% if c.caption_config.position == "top" %}selected{% endif %}>Top</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div class="row">
+                          <div>
+                            <label for="font-family-{{ c.id }}">Fonte</label>
+                            <input id="font-family-{{ c.id }}"
+                                   name="font_family"
+                                   placeholder="Montserrat"
+                                   value="{{ c.caption_config.font_family|default_if_none:'' }}">
+                          </div>
+                          <div>
+                            <label for="font-size-{{ c.id }}">Tamanho</label>
+                            <input id="font-size-{{ c.id }}"
+                                   name="font_size"
+                                   type="number"
+                                   step="1"
+                                   placeholder="44"
+                                   value="{{ c.caption_config.font_size|default_if_none:'' }}">
+                          </div>
+                        </div>
+                        <div class="row">
+                          <div>
+                            <label for="font-color-{{ c.id }}">Cor da fonte</label>
+                            <input id="font-color-{{ c.id }}"
+                                   name="font_color"
+                                   type="text"
+                                   placeholder="#FFFFFF"
+                                   value="{{ c.caption_config.font_color|default_if_none:'' }}">
+                          </div>
+                          <div>
+                            <label for="highlight-color-{{ c.id }}">Cor destaque</label>
+                            <input id="highlight-color-{{ c.id }}"
+                                   name="highlight_color"
+                                   type="text"
+                                   placeholder="#FFD84D"
+                                   value="{{ c.caption_config.highlight_color|default_if_none:'' }}">
+                          </div>
+                        </div>
+                        <label class="toggle">
+                          <input type="checkbox" name="background" {% if not c.caption_config or c.caption_config.background %}checked{% endif %}>
+                          Fundo ligado
+                        </label>
+                      </div>
+                    </div>
+                    <div class="modal-footer">
+                      <button type="button" class="secondary" data-modal-close>Cancelar</button>
+                      <button type="submit"
+                              class="primary"
+                              data-apply-edits="{{ c.id }}">
+                        Aplicar edições / Re-renderizar
+                      </button>
+                    </div>
                   </form>
                 </div>
 
@@ -633,6 +954,102 @@
         const progressBar = document.getElementById("progress-bar");
         const progressMeta = document.getElementById("progress-meta");
         const progressSteps = document.getElementById("progress-steps");
+        const FRAME_STEP = 1 / 30;
+
+        function toFixedTime(value) {
+          if (Number.isNaN(value) || value === null || value === undefined) return "0.00";
+          return value.toFixed(2);
+        }
+
+        function openModal(modal) {
+          if (!modal) return;
+          modal.classList.add("active");
+          modal.setAttribute("aria-hidden", "false");
+          const clipId = modal.id.replace("edit-modal-", "");
+          const video = document.querySelector(`[data-edit-video="${clipId}"]`);
+          const startInput = document.querySelector(`[data-edit-start="${clipId}"]`);
+          if (video) {
+            const startValue = parseFloat(startInput?.value);
+            if (!Number.isNaN(startValue)) {
+              video.currentTime = Math.max(startValue, 0);
+            }
+          }
+        }
+
+        function closeModal(modal) {
+          if (!modal) return;
+          modal.classList.remove("active");
+          modal.setAttribute("aria-hidden", "true");
+        }
+
+        document.querySelectorAll("[data-modal-target]").forEach(button => {
+          button.addEventListener("click", () => {
+            const targetId = button.getAttribute("data-modal-target");
+            openModal(document.getElementById(targetId));
+          });
+        });
+
+        document.querySelectorAll("[data-modal-close]").forEach(button => {
+          button.addEventListener("click", () => {
+            const modal = button.closest(".edit-modal");
+            closeModal(modal);
+          });
+        });
+
+        document.addEventListener("keydown", event => {
+          if (event.key !== "Escape") return;
+          document.querySelectorAll(".edit-modal.active").forEach(modal => closeModal(modal));
+        });
+
+        document.addEventListener("click", event => {
+          const stepBtn = event.target.closest("[data-step]");
+          if (stepBtn) {
+            const clipId = stepBtn.dataset.clipId;
+            const video = document.querySelector(`[data-edit-video="${clipId}"]`);
+            if (!video) return;
+            video.pause();
+            const direction = parseInt(stepBtn.dataset.step, 10) || 0;
+            video.currentTime = Math.max(0, video.currentTime + direction * FRAME_STEP);
+            return;
+          }
+          const setBtn = event.target.closest("[data-set]");
+          if (setBtn) {
+            const clipId = setBtn.dataset.clipId;
+            const video = document.querySelector(`[data-edit-video="${clipId}"]`);
+            if (!video) return;
+            const target = setBtn.dataset.set;
+            const input = document.querySelector(
+              target === "start"
+                ? `[data-edit-start="${clipId}"]`
+                : `[data-edit-end="${clipId}"]`
+            );
+            if (input) {
+              input.value = toFixedTime(video.currentTime);
+            }
+          }
+        });
+
+        document.querySelectorAll("[data-edit-video]").forEach(video => {
+          const clipId = video.getAttribute("data-edit-video");
+          const currentLabel = document.querySelector(`[data-current-time="${clipId}"]`);
+          if (!currentLabel) return;
+          video.addEventListener("timeupdate", () => {
+            currentLabel.textContent = `${toFixedTime(video.currentTime)}s`;
+          });
+          video.addEventListener("loadedmetadata", () => {
+            currentLabel.textContent = `${toFixedTime(video.currentTime)}s`;
+          });
+        });
+
+        document.querySelectorAll("[data-edit-form]").forEach(form => {
+          form.addEventListener("submit", () => {
+            const clipId = form.getAttribute("data-edit-form");
+            const button = document.querySelector(`[data-apply-edits="${clipId}"]`);
+            if (!button) return;
+            button.disabled = true;
+            button.textContent = "Reprocessando...";
+          });
+        });
 
         const stepLabels = {
           download: "Download",

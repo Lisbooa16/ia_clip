@@ -15,6 +15,7 @@ from faster_whisper import WhisperModel
 from yt_dlp import DownloadError
 
 from analysis.services.viral_analysis import _extract_keywords
+from subtitles.subtitle_builder import build_subtitle_filter
 from clips.viral_engine.expansion import expand_window
 from clips.viral_engine.profiles import get_profile
 from clips.viral_engine.scoring import score_segment
@@ -552,59 +553,6 @@ def build_capcut_ass(words: list[dict], out_ass_path: str, font="Arial", font_si
     flush()
     subs.save(out_ass_path)
 
-def build_words_timeline(transcript, clip_start, clip_end, max_gap=0.5):
-    words = []
-
-    # coleta palavras reais
-    for s in transcript["segments"]:
-        for w in s.get("words", []):
-            if w["end"] <= clip_start:
-                continue
-            if w["start"] >= clip_end:
-                continue
-
-            words.append({
-                "start": max(0.0, w["start"] - clip_start),
-                "end": min(clip_end, w["end"]) - clip_start,
-                "word": w["word"] or "…",
-            })
-
-    if not words:
-        # fallback total (vídeo nunca fica sem legenda)
-        return [{
-            "start": 0.0,
-            "end": clip_end - clip_start,
-            "word": "…",
-        }]
-
-    # ordena
-    words.sort(key=lambda w: w["start"])
-
-    # preenche gaps
-    filled = []
-    last_end = 0.0
-
-    for w in words:
-        if w["start"] - last_end > max_gap:
-            filled.append({
-                "start": last_end,
-                "end": w["start"],
-                "word": "…",
-            })
-        filled.append(w)
-        last_end = w["end"]
-
-    # cobre final
-    total_dur = clip_end - clip_start
-    if total_dur - last_end > max_gap:
-        filled.append({
-            "start": last_end,
-            "end": total_dur,
-            "word": "…",
-        })
-
-    return filled
-
 def make_vertical_clip_with_captions(
     video_path: str,
     start: float,
@@ -613,6 +561,8 @@ def make_vertical_clip_with_captions(
     media_root: Path,
     clip_id: str,
     output_path: Optional[Path] = None,  # <--- novo parâmetro opcional
+    caption_style: str | None = None,
+    caption_config: dict | None = None,
 ) -> tuple[str, str]:
 
     # diretório padrão, caso nenhum output_path seja passado
@@ -626,35 +576,11 @@ def make_vertical_clip_with_captions(
         ensure_dir(default_out_dir)
         out_mp4 = default_out_dir / f"{clip_id}.mp4"
 
-    sub_path = subtitle_path.replace("\\", "/").replace(":", "\\:")
-
-    font_size = 44
-    margin_v = 140
-    margin_h = 64
-    font_size = max(36, min(font_size, 48))
-    margin_v = min(margin_v, 180)
-    subtitle_style = (
-        "FontName=Montserrat,"
-        f"FontSize={font_size},"
-        "PrimaryColour=&H00FFFFFF,"
-        "OutlineColour=&H00000000,"
-        "BackColour=&H00000000,"
-        "Bold=1,"
-        "Outline=2,"
-        "Shadow=1,"
-        "Alignment=2,"
-        f"MarginL={margin_h},"
-        f"MarginR={margin_h},"
-        f"MarginV={margin_v},"
-        "PlayResX=1080,"
-        "PlayResY=1920,"
-        "WrapStyle=2"
+    subtitle_filter = build_subtitle_filter(
+        subtitle_path=subtitle_path,
+        caption_style=caption_style,
+        caption_config=caption_config,
     )
-    subtitle_filter = None
-    if subtitle_path and Path(subtitle_path).exists():
-        subtitle_filter = f"subtitles=filename='{sub_path}':force_style='{subtitle_style}'"
-    else:
-        print(f"[SUB] ⚠️ missing subtitles path={subtitle_path}")
 
     vf_parts = [
         "setpts=PTS-STARTPTS",
@@ -668,10 +594,8 @@ def make_vertical_clip_with_captions(
         "format=yuv420p",
     ])
     vf = ",".join(vf_parts)
-    print(
-        "[SUB] ✅ style=shortform "
-        f"font=Montserrat size={font_size} margin_v={margin_v} res=1080x1920"
-    )
+    if subtitle_filter:
+        print("[SUB] ✅ captions enabled")
     print("[RENDER] 🎞️ output_fps=30")
 
     cmd = [
@@ -714,56 +638,30 @@ def make_vertical_clip_with_focus(
     clip_id: str,
     crop: dict | None,
     output_path: Path,
+    caption_style: str | None = None,
+    caption_config: dict | None = None,
 ):
-    sub_path = subtitle_path.replace("\\", "/").replace(":", "\\:")
-    font_size = 44
-    margin_v = 140
-    margin_h = 64
-    font_size = max(36, min(font_size, 48))
-    margin_v = min(margin_v, 180)
-    subtitle_style = (
-        "FontName=Montserrat,"
-        f"FontSize={font_size},"
-        "PrimaryColour=&H00FFFFFF,"
-        "OutlineColour=&H00000000,"
-        "BackColour=&H00000000,"
-        "Bold=1,"
-        "Outline=2,"
-        "Shadow=1,"
-        "Alignment=2,"
-        f"MarginL={margin_h},"
-        f"MarginR={margin_h},"
-        f"MarginV={margin_v},"
-        "PlayResX=1080,"
-        "PlayResY=1920,"
-        "WrapStyle=2"
+    subtitle_filter = build_subtitle_filter(
+        subtitle_path=subtitle_path,
+        caption_style=caption_style,
+        caption_config=caption_config,
     )
-
-    subtitle_filter = None
-    if subtitle_path and Path(subtitle_path).exists():
-        subtitle_filter = f"subtitles=filename='{sub_path}':force_style='{subtitle_style}'"
-    else:
-        print(f"[SUB] ⚠️ missing subtitles path={subtitle_path}")
 
     vf_parts = ["setpts=PTS-STARTPTS"]
     if crop:
-        vf = (
-            f"crop={crop['w']}:{crop['h']}:{crop['x']}:{crop['y']},"
-            "scale=1080:1920,"
-            f"subtitles=filename='{sub_path}':force_style='{subtitle_style}',"
-            "fps=30,format=yuv420p"
+        vf_parts.append(
+            f"crop={crop['w']}:{crop['h']}:{crop['x']}:{crop['y']}"
         )
+        vf_parts.append("scale=1080:1920")
     else:
-        vf = (
-            "scale=1080:1920:force_original_aspect_ratio=increase,"
-            "crop=1080:1920,"
-            f"subtitles=filename='{sub_path}':force_style='{subtitle_style}',"
-            "fps=30,format=yuv420p"
-        )
-    print(
-        "[SUB] ✅ style=shortform "
-        f"font=Montserrat size={font_size} margin_v={margin_v} res=1080x1920"
-    )
+        vf_parts.append("scale=1080:1920:force_original_aspect_ratio=increase")
+        vf_parts.append("crop=1080:1920")
+    if subtitle_filter:
+        vf_parts.append(subtitle_filter)
+    vf_parts.extend(["fps=30", "format=yuv420p"])
+    vf = ",".join(vf_parts)
+    if subtitle_filter:
+        print("[SUB] ✅ captions enabled")
     print("[RENDER] 🎞️ output_fps=30")
 
     cmd = [
