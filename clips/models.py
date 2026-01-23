@@ -19,6 +19,10 @@ class VideoJob(models.Model):
         ("error", "Error"),
         ("tracking_faces", "Tracking_Faces")
     ]
+    JOB_TYPE = [
+        ("video", "Video"),
+        ("story", "Story"),
+    ]
     PROCESSING_MODE = [
         ("clips", "Clips"),
         ("full", "Full"),
@@ -32,12 +36,18 @@ class VideoJob(models.Model):
         choices=PROCESSING_MODE,
         default="clips",
     )
+    job_type = models.CharField(
+        max_length=10,
+        choices=JOB_TYPE,
+        default="video",
+    )
 
     title = models.CharField(max_length=255, blank=True)
     source = models.CharField(max_length=20, blank=True)  # yt/tt/ig/other
 
     original_path = models.CharField(max_length=500, blank=True)  # caminho local do mp4
     error = models.TextField(blank=True)
+    story_text = models.TextField(blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     transcript_data = models.JSONField(null=True, blank=True)
@@ -141,6 +151,31 @@ def fail_running_steps(job_id: int, message: str | None = None) -> None:
 
 
 def get_job_progress(job: VideoJob) -> dict:
+    if job.job_type == "story":
+        clips = list(StoryClip.objects.filter(job=job).order_by("part_number"))
+        total = len(clips) or 1
+        done = len([c for c in clips if c.status == "done"])
+        progress_percent = int((done / total) * 100)
+        elapsed_seconds = (timezone.now() - job.created_at).total_seconds()
+        steps_payload = [
+            {
+                "name": f"pt{c.part_number}",
+                "status": c.status,
+                "duration": int(c.duration_seconds) if c.duration_seconds else None,
+            }
+            for c in clips
+        ]
+        return {
+            "job_id": job.id,
+            "status": job.status,
+            "current_step": "story",
+            "next_step": None,
+            "progress_percent": progress_percent,
+            "elapsed_seconds": int(elapsed_seconds),
+            "estimated_remaining_seconds": None,
+            "steps": steps_payload,
+        }
+
     ensure_job_steps(job)
     steps = list(
         VideoJobStep.objects.filter(job=job).order_by("id")
@@ -204,15 +239,68 @@ def get_job_progress(job: VideoJob) -> dict:
     }
 
 class VideoClip(models.Model):
+    CAPTION_STYLE = [
+        ("static", "Static"),
+        ("word_by_word", "Word by word"),
+    ]
+
     job = models.ForeignKey(VideoJob, on_delete=models.CASCADE, related_name="clips")
 
     start = models.FloatField()
     end = models.FloatField()
     score = models.FloatField(default=0)
 
+    original_video_path = models.CharField(max_length=500, blank=True)
+    original_start = models.FloatField(null=True, blank=True)
+    original_end = models.FloatField(null=True, blank=True)
+    edited_start = models.FloatField(null=True, blank=True)
+    edited_end = models.FloatField(null=True, blank=True)
+
+    caption_style = models.CharField(
+        max_length=20,
+        choices=CAPTION_STYLE,
+        default="static",
+    )
+    caption_config = models.JSONField(null=True, blank=True)
+
     caption = models.TextField(blank=True)
     output_path = models.CharField(max_length=500)  # caminho local do clip final
 
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def effective_start(self) -> float:
+        if self.edited_start is not None:
+            return self.edited_start
+        if self.original_start is not None:
+            return self.original_start
+        return self.start
+
+    def effective_end(self) -> float:
+        if self.edited_end is not None:
+            return self.edited_end
+        if self.original_end is not None:
+            return self.original_end
+        return self.end
+
+    def source_video_path(self) -> str:
+        return self.original_video_path or self.job.original_path or ""
+
+
+class StoryClip(models.Model):
+    STATUS = [
+        ("pending", "Pending"),
+        ("processing", "Processing"),
+        ("done", "Done"),
+        ("error", "Error"),
+    ]
+
+    job = models.ForeignKey(VideoJob, on_delete=models.CASCADE, related_name="story_clips")
+    part_number = models.IntegerField()
+    text = models.TextField()
+    video_path = models.CharField(max_length=500, blank=True)
+    duration_seconds = models.FloatField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS, default="pending")
+    error = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
 class ClipPublication(models.Model):
@@ -229,6 +317,31 @@ class ClipPublication(models.Model):
 
     clip = models.ForeignKey(
         VideoClip,
+        on_delete=models.CASCADE,
+        related_name="publications",
+    )
+    platform = models.CharField(max_length=20, choices=PLATFORM)
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS, default="queued")
+    external_url = models.URLField(blank=True)
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+class StoryClipPublication(models.Model):
+    STATUS = [
+        ("queued", "Queued"),
+        ("publishing", "Publishing"),
+        ("published", "Published"),
+        ("error", "Error"),
+    ]
+
+    PLATFORM = [
+        ("youtube", "YouTube"),
+    ]
+
+    clip = models.ForeignKey(
+        "StoryClip",
         on_delete=models.CASCADE,
         related_name="publications",
     )

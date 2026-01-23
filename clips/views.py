@@ -1,30 +1,64 @@
-from pathlib import Path
-
 from django.conf import settings
 from django.contrib import messages
 from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST
 
-from .models import ClipPublication, VideoJob, VideoClip, get_job_progress
-from .services import make_vertical_clip_with_captions
-from .tasks import process_video_job, publish_clip_to_youtube
+from .models import ClipPublication, StoryClipPublication, VideoJob, VideoClip, get_job_progress
+from .tasks import process_video_job, publish_clip_to_youtube, process_story_job, publish_story_clip_to_youtube
+from .tasks_clips import render_clip_edit
 
 from django.utils.dateparse import parse_datetime
 from django.utils.timezone import make_aware, get_current_timezone
 from datetime import timezone
 
+def _parse_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+def _render_clip_from_edit(clip: VideoClip) -> None:
+    render_clip_edit.apply_async(args=[clip.id], queue="clips_cpu")
+
 def home(request):
     if request.method == "POST":
+        job_type = request.POST.get("job_type", "video")
         url = request.POST.get("url", "").strip()
         language = request.POST.get("language", "auto")
         processing_mode = request.POST.get("processing_mode", "clips")
+        story_title = request.POST.get("story_title", "").strip()
+        story_text = request.POST.get("story_text", "").strip()
+
+        if job_type == "story":
+            if not story_text:
+                messages.error(request, "Informe o texto da história.")
+                return redirect("home")
+            job = VideoJob.objects.create(
+                url="",
+                language=language,
+                processing_mode="clips",
+                status="pending",
+                job_type="story",
+                title=story_title,
+                story_text=story_text,
+            )
+            process_story_job.apply_async(
+                args=[job.id],
+                queue="clips_cpu",
+            )
+            return redirect("job_detail", job_id=job.id)
+
+        if not url:
+            messages.error(request, "Informe a URL do vídeo.")
+            return redirect("home")
 
         job = VideoJob.objects.create(
             url=url,
             language=language,
             processing_mode=processing_mode,
             status="pending",
+            job_type="video",
         )
         process_video_job.apply_async(
             args=[job.id],
@@ -63,6 +97,12 @@ def job_detail(request, job_id):
     youtube_ready = True
     for clip in job.clips.all():
         clip.latest_publication = clip.publications.order_by("-created_at").first()
+    story_clips = []
+    total_story_duration = None
+    if job.job_type == "story":
+        story_clips = list(job.story_clips.order_by("part_number"))
+        durations = [c.duration_seconds or 0 for c in story_clips]
+        total_story_duration = sum(durations) if durations else None
     full_video_clip = None
     if job.processing_mode == "full":
         full_video_clip = job.clips.filter(caption="Vídeo completo").order_by("id").first()
@@ -73,6 +113,8 @@ def job_detail(request, job_id):
             "job": job,
             "youtube_ready": youtube_ready,
             "full_video_clip": full_video_clip,
+            "story_clips": story_clips,
+            "total_story_duration": total_story_duration,
         },
     )
 
@@ -129,26 +171,44 @@ def job_progress(request, job_id):
 @require_POST
 def reprocess_clip(request, clip_id):
     clip = get_object_or_404(VideoClip, id=clip_id)
-    job = clip.job
+    _render_clip_from_edit(clip)
+    messages.success(request, "Reprocessamento enfileirado.")
+    return redirect("job_detail", job_id=clip.job_id)
 
-    media_root = Path(settings.MEDIA_ROOT)
+@require_POST
+def update_clip_edit(request, clip_id):
+    clip = get_object_or_404(VideoClip, id=clip_id)
 
-    transcript = job.transcript_data  # veja observação abaixo
+    edited_start = _parse_float(request.POST.get("edited_start"))
+    edited_end = _parse_float(request.POST.get("edited_end"))
+    caption_style = (request.POST.get("caption_style") or "").strip().lower()
+    if caption_style not in {"static", "word_by_word"}:
+        caption_style = clip.caption_style or "static"
 
-    out_mp4, caption = make_vertical_clip_with_captions(
-        video_path=str(job.original_path),
-        start=clip.start,
-        end=clip.end,
-        transcript=transcript,
-        media_root=media_root,
-        clip_id=str(clip.id),
-    )
+    caption_config = {
+        "font_family": (request.POST.get("font_family") or "").strip() or None,
+        "font_size": _parse_float(request.POST.get("font_size")),
+        "font_color": (request.POST.get("font_color") or "").strip() or None,
+        "highlight_color": (request.POST.get("highlight_color") or "").strip() or None,
+        "background": bool(request.POST.get("background")),
+        "position": (request.POST.get("position") or "").strip() or None,
+    }
+    caption_config = {k: v for k, v in caption_config.items() if v is not None}
 
-    clip.output_path = out_mp4
-    clip.caption = caption
-    clip.save(update_fields=["output_path", "caption"])
+    clip.edited_start = edited_start
+    clip.edited_end = edited_end
+    clip.caption_style = caption_style
+    clip.caption_config = caption_config or None
+    clip.save(update_fields=[
+        "edited_start",
+        "edited_end",
+        "caption_style",
+        "caption_config",
+    ])
 
-    return redirect("job_detail", job_id=job.id)
+    _render_clip_from_edit(clip)
+    messages.success(request, "Edição salva. Reprocessamento enfileirado.")
+    return redirect("job_detail", job_id=clip.job_id)
 
 @require_POST
 def publish_clip_youtube(request, clip_id):
@@ -193,4 +253,46 @@ def publish_clip_youtube(request, clip_id):
         request,
         f"Publicação enfileirada para o canal: {youtube_channel}",
     )
+    return redirect("job_detail", job_id=job.id)
+
+
+@require_POST
+def publish_story_job(request, job_id):
+    job = get_object_or_404(VideoJob, id=job_id)
+    if job.job_type != "story":
+        return HttpResponseBadRequest("Job inválido.")
+
+    title_base = request.POST.get("title", "").strip() or job.title or "História"
+    description = request.POST.get("description", "").strip()
+    youtube_channel = request.POST.get("youtube_channel")
+    publish_at_raw = request.POST.get("publish_at")
+
+    channels = settings.SOCIAL_PUBLISHING.get("youtube", {}).get("channels", {})
+    if youtube_channel not in channels:
+        messages.error(request, "Canal do YouTube inválido.")
+        return redirect("job_detail", job_id=job.id)
+
+    publish_at = None
+    if publish_at_raw:
+        dt = parse_datetime(publish_at_raw)
+        if dt:
+            publish_at = make_aware(dt, get_current_timezone()).astimezone(timezone.utc)
+
+    story_clips = job.story_clips.order_by("part_number")
+    for clip in story_clips:
+        if not clip.video_path:
+            continue
+        publication = StoryClipPublication.objects.create(
+            clip=clip,
+            platform="youtube",
+            title=f"{title_base} PT{clip.part_number}",
+            description=description,
+            status="queued",
+        )
+        publish_story_clip_to_youtube.apply_async(
+            args=[publication.id, youtube_channel, publish_at.isoformat() if publish_at else None],
+            queue="clips_cpu",
+        )
+
+    messages.success(request, "Publicações enfileiradas para a história.")
     return redirect("job_detail", job_id=job.id)

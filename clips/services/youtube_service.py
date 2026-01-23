@@ -6,7 +6,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-from clips.models import ClipPublication
+from clips.models import ClipPublication, StoryClipPublication
 
 YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 TOKEN_URI = "https://oauth2.googleapis.com/token"
@@ -50,6 +50,53 @@ def upload_clip_publication(publication: ClipPublication, channel_key: str, publ
         status = {
             "privacyStatus": "private",  # obrigatório para agendamento
             "publishAt": publish_at,  # RFC3339 UTC
+        }
+    else:
+        status = {
+            "privacyStatus": settings.SOCIAL_PUBLISHING
+            .get("youtube", {})
+            .get("privacy_status", "private"),
+        }
+
+    request = youtube.videos().insert(
+        part="snippet,status",
+        body={
+            "snippet": {
+                "title": publication.title,
+                "description": publication.description,
+                "categoryId": "22",
+            },
+            "status": status,
+        },
+        media_body=MediaFileUpload(str(video_path), resumable=True),
+    )
+
+    response = None
+    while response is None:
+        _status, response = request.next_chunk()
+
+    video_id = response.get("id")
+    if not video_id:
+        raise RuntimeError("Falha ao obter ID do vídeo no upload.")
+
+    return {
+        "video_id": video_id,
+        "url": f"https://youtu.be/{video_id}",
+    }
+
+
+def upload_story_publication(publication: StoryClipPublication, channel_key: str, publish_at: str | None = None,) -> dict:
+    video_path = _get_video_path(publication.clip.video_path)
+    if not video_path.exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {video_path}")
+
+    creds = _build_credentials(channel_key)
+    youtube = build("youtube", "v3", credentials=creds)
+
+    if publish_at:
+        status = {
+            "privacyStatus": "private",
+            "publishAt": publish_at,
         }
     else:
         status = {

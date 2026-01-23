@@ -6,11 +6,55 @@ from pathlib import Path
 from celery import shared_task
 from django.conf import settings
 
-from subtitles.subtitle_builder import segments_for_clip, fill_gaps, to_srt
+from subtitles.subtitle_builder import build_subtitle_artifacts
 from .domain.render_focus import average_face_box, compute_vertical_crop, find_focus_face, focus_blocks_for_clip
 from .models import VideoClip, VideoJob, ensure_job_steps, update_job_step
 from .services import make_vertical_clip_with_captions, make_vertical_clip_with_focus, FFMPEG_BIN
 import subprocess
+import time
+
+
+@shared_task(bind=True)
+def render_clip_edit(self, clip_id: int):
+    clip = VideoClip.objects.get(id=clip_id)
+    job = clip.job
+    media_root = Path(settings.MEDIA_ROOT)
+
+    clip_start = clip.effective_start()
+    clip_end = clip.effective_end()
+    subs_dir = media_root / "subs"
+    subtitle_path, subtitle_style, subtitle_config = build_subtitle_artifacts(
+        transcript=job.transcript_data,
+        clip_start=clip_start,
+        clip_end=clip_end,
+        caption_style=clip.caption_style,
+        caption_config=clip.caption_config,
+        output_dir=subs_dir,
+        clip_id=str(clip.id),
+        suffix="_edit",
+    )
+
+    edited_out_dir = media_root / "videos" / "clips"
+    edited_out_dir.mkdir(parents=True, exist_ok=True)
+    version = int(time.time())
+    output_path = edited_out_dir / f"{clip.id}_edit_{version}.mp4"
+
+    out_mp4, caption = make_vertical_clip_with_captions(
+        video_path=clip.source_video_path(),
+        start=clip_start,
+        end=clip_end,
+        subtitle_path=str(subtitle_path),
+        media_root=media_root,
+        clip_id=str(clip.id),
+        output_path=output_path,
+        caption_style=subtitle_style,
+        caption_config=subtitle_config.__dict__,
+    )
+
+    clip.output_path = out_mp4
+    clip.caption = caption
+    clip.save(update_fields=["output_path", "caption"])
+    return out_mp4
 
 
 @shared_task(bind=True)
@@ -34,6 +78,9 @@ def render_clip(
         job_id=job_id,
         start=start,
         end=end,
+        original_start=start,
+        original_end=end,
+        original_video_path=video_path,
         score=score,
         caption=role or "",
         output_path="",
@@ -42,17 +89,15 @@ def render_clip(
     try:
         # 1️⃣ LEGENDA (como já fazia)
         subs_dir = media_root / "subs"
-        subs_dir.mkdir(parents=True, exist_ok=True)
-
-        def write_srt_for_range(clip_start, clip_end, suffix=""):
-            segs = segments_for_clip(transcript["segments"], clip_start, clip_end)
-            segs = fill_gaps(segs)
-            srt_text = to_srt(segs)
-            srt_path = subs_dir / f"{clip.id}{suffix}.srt"
-            srt_path.write_text(srt_text, encoding="utf-8")
-            return srt_path
-
-        srt_path = write_srt_for_range(start, end)
+        srt_path, subtitle_style, subtitle_config = build_subtitle_artifacts(
+            transcript=transcript,
+            clip_start=start,
+            clip_end=end,
+            caption_style=clip.caption_style,
+            caption_config=clip.caption_config,
+            output_dir=subs_dir,
+            clip_id=str(clip.id),
+        )
 
         # 2️⃣ CARREGA FOCO E FACES
         focus_path = clip_dir / "focus_timeline.json"
@@ -85,6 +130,8 @@ def render_clip(
                 subtitle_path=str(srt_path),
                 media_root=media_root,
                 clip_id=str(clip.id),
+                caption_style=subtitle_style,
+                caption_config=subtitle_config.__dict__,
             )
             clip.output_path = out_mp4
             clip.caption = caption
@@ -123,7 +170,16 @@ def render_clip(
                 )
 
                 # Aqui usamos legenda + corte simples (sem lógica de foco)
-                hook_srt_path = write_srt_for_range(preview_start, preview_end, suffix="_hook")
+                hook_srt_path, hook_style, hook_config = build_subtitle_artifacts(
+                    transcript=transcript,
+                    clip_start=preview_start,
+                    clip_end=preview_end,
+                    caption_style=clip.caption_style,
+                    caption_config=clip.caption_config,
+                    output_dir=subs_dir,
+                    clip_id=str(clip.id),
+                    suffix="_hook",
+                )
                 make_vertical_clip_with_captions(
                     video_path=video_path,
                     start=preview_start,
@@ -132,6 +188,8 @@ def render_clip(
                     media_root=media_root,
                     clip_id=f"{clip.id}_hook",
                     output_path=hook_out,
+                    caption_style=hook_style,
+                    caption_config=hook_config.__dict__,
                 )
                 temp_files.append(hook_out)
 
@@ -466,6 +524,8 @@ def render_clip(
                         clip_id=temp_out.stem,
                         crop=last_crop,
                         output_path=temp_out,
+                        caption_style=subtitle_style,
+                        caption_config=subtitle_config.__dict__,
                     )
                     temp_files.append(temp_out)
                     block_start = pre_focus_end
@@ -498,6 +558,8 @@ def render_clip(
                         clip_id=temp_out.stem,
                         crop=step_crop,
                         output_path=temp_out,
+                        caption_style=subtitle_style,
+                        caption_config=subtitle_config.__dict__,
                     )
                     temp_files.append(temp_out)
 
@@ -520,6 +582,8 @@ def render_clip(
                     clip_id=temp_out.stem,
                     crop=crop,
                     output_path=temp_out,
+                    caption_style=subtitle_style,
+                    caption_config=subtitle_config.__dict__,
                 )
 
                 temp_files.append(temp_out)
