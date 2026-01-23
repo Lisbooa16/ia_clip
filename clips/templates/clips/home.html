@@ -212,15 +212,27 @@
       <p>Crie clips virais automaticamente a partir de qualquer vídeo</p>
     </header>
 
+    {% if messages %}
+      <div class="card">
+        {% for message in messages %}
+          <p style="margin:0 0 8px;color:var(--muted)">{{ message }}</p>
+        {% endfor %}
+      </div>
+    {% endif %}
+
     <div class="card">
       <form method="post">
         {% csrf_token %}
         <div class="form-row">
+          <select name="job_type">
+            <option value="video">Vídeo</option>
+            <option value="story">História (PT1/PT2/PT3)</option>
+          </select>
+
           <input
             type="url"
             name="url"
             placeholder="Cole o link do YouTube, TikTok ou Instagram"
-            required
           />
 
           <select name="language">
@@ -235,6 +247,18 @@
           </select>
 
           <button type="submit">Processar</button>
+        </div>
+        <div style="margin-top:12px;display:grid;gap:10px;">
+          <input
+            type="text"
+            name="story_title"
+            placeholder="Título da história (opcional)"
+          />
+          <textarea
+            name="story_text"
+            placeholder="Cole o texto da história (PT1/PT2/PT3 ou parágrafos)"
+            style="min-height:120px;padding:12px;border-radius:10px;border:1px solid var(--border);background:#020617;color:var(--text);font-size:14px;"
+          ></textarea>
         </div>
       </form>
     </div>

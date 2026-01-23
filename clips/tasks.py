@@ -17,8 +17,10 @@ from .media.face_smoothing import smooth_faces
 from .media.face_tracking import track_faces
 from .models import (
     ClipPublication,
+    StoryClipPublication,
     VideoJob,
     VideoClip,
+    StoryClip,
     ensure_job_steps,
     update_job_step,
     fail_running_steps,
@@ -38,7 +40,11 @@ from .services.clip_service import generate_clips
 from .tasks_clips import render_clip, finalize_job
 from .text_story import build_transcript_from_text
 from .translator import translate_blueprint_to_cut_plan, generate_clip_sequence
-from .services.youtube_service import upload_clip_publication
+from .services.youtube_service import upload_clip_publication, upload_story_publication
+from subtitles.subtitle_builder import build_word_by_word_ass
+from subtitles.caption_styles import CaptionStyleConfig, CaptionPosition
+import re
+import math
 
 def _faces_cache_key(video_path: str, fps_sample: int) -> str | None:
     try:
@@ -1210,3 +1216,157 @@ def publish_clip_to_youtube(self, publication_id: int, channel_key: str, publish
         publication.error = str(exc)
         publication.save(update_fields=["status", "error"])
         raise
+
+
+@shared_task(bind=True)
+def publish_story_clip_to_youtube(self, publication_id: int, channel_key: str, publish_at=None):
+    publication = StoryClipPublication.objects.select_related("clip").get(id=publication_id)
+    publication.status = "publishing"
+    publication.error = ""
+    publication.save(update_fields=["status", "error"])
+
+    try:
+        result = upload_story_publication(
+            publication,
+            channel_key=channel_key,
+            publish_at=publish_at,
+        )
+        publication.status = "published"
+        publication.external_url = result.get("url", "")
+        publication.save(update_fields=["status", "external_url"])
+        return result
+    except Exception as exc:
+        publication.status = "error"
+        publication.error = str(exc)
+        publication.save(update_fields=["status", "error"])
+        raise
+
+
+def _split_story_parts(text: str) -> list[str]:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
+    matches = list(re.finditer(r"(?im)^pt\\s*\\d+\\s*[:\\-]\\s*", cleaned))
+    if matches:
+        parts = []
+        for idx, match in enumerate(matches):
+            start = match.end()
+            end = matches[idx + 1].start() if idx + 1 < len(matches) else len(cleaned)
+            part_text = cleaned[start:end].strip()
+            if part_text:
+                parts.append(part_text)
+        return parts
+    chunks = [p.strip() for p in re.split(r"\n{2,}", cleaned) if p.strip()]
+    if len(chunks) > 1:
+        return chunks
+    sentences = re.split(r"(?<=[.!?])\\s+", cleaned)
+    if len(sentences) <= 1:
+        return [cleaned]
+    target = max(1, math.ceil(len(sentences) / 3))
+    parts = []
+    for idx in range(0, len(sentences), target):
+        parts.append(" ".join(sentences[idx:idx + target]).strip())
+    return [p for p in parts if p]
+
+
+def _build_story_words(text: str, duration_seconds: float) -> list[dict]:
+    tokens = [w for w in re.split(r"\\s+", text.strip()) if w]
+    if not tokens:
+        return [{"start": 0.0, "end": duration_seconds, "word": "…"}]
+    per_word = duration_seconds / max(len(tokens), 1)
+    words = []
+    cursor = 0.0
+    for word in tokens:
+        start = cursor
+        end = min(cursor + per_word, duration_seconds)
+        words.append({"start": start, "end": end, "word": word})
+        cursor = end
+    return words
+
+
+def _estimate_story_duration(text: str) -> float:
+    words = [w for w in re.split(r"\\s+", text.strip()) if w]
+    if not words:
+        return 8.0
+    seconds = max(8.0, min(len(words) * 0.35, 30.0))
+    return round(seconds, 2)
+
+
+@shared_task(bind=True)
+def process_story_job(self, job_id: int):
+    job = VideoJob.objects.get(id=job_id)
+    job.status = "clipping"
+    job.save(update_fields=["status"])
+
+    story_text = job.story_text or ""
+    parts = _split_story_parts(story_text)
+    if not parts:
+        job.status = "error"
+        job.error = "Texto da história vazio."
+        job.save(update_fields=["status", "error"])
+        return
+
+    StoryClip.objects.filter(job=job).delete()
+    clips = []
+    for idx, part in enumerate(parts, 1):
+        clips.append(StoryClip.objects.create(
+            job=job,
+            part_number=idx,
+            text=part,
+            status="pending",
+        ))
+
+    media_root = Path(settings.MEDIA_ROOT)
+    subs_dir = media_root / "subs"
+    subs_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = media_root / "videos" / "clips"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for clip in clips:
+        try:
+            clip.status = "processing"
+            clip.save(update_fields=["status"])
+            duration = _estimate_story_duration(clip.text)
+            words = _build_story_words(clip.text, duration)
+            ass_path = subs_dir / f"story_{job.id}_pt{clip.part_number}.ass"
+            config = CaptionStyleConfig(
+                font_family="Montserrat",
+                font_size=44,
+                font_color="#FFFFFF",
+                highlight_color="#FFD84D",
+                background=True,
+                position=CaptionPosition.BOTTOM,
+            )
+            build_word_by_word_ass(words, config, str(ass_path))
+
+            output_path = output_dir / f"story_{job.id}_pt{clip.part_number}.mp4"
+            ass_filter = str(ass_path).replace("\\", "/").replace(":", "\\:")
+            cmd = [
+                FFMPEG_BIN, "-y",
+                "-f", "lavfi",
+                "-i", f"color=c=black:s=1080x1920:d={duration}",
+                "-vf", f"subtitles=filename='{ass_filter}'",
+                "-r", "30",
+                "-pix_fmt", "yuv420p",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "20",
+                str(output_path),
+            ]
+            subprocess.check_call(cmd)
+
+            clip.video_path = str(output_path)
+            clip.duration_seconds = duration
+            clip.status = "done"
+            clip.save(update_fields=["video_path", "duration_seconds", "status"])
+        except Exception as e:
+            clip.status = "error"
+            clip.error = str(e)
+            clip.save(update_fields=["status", "error"])
+            job.status = "error"
+            job.error = str(e)
+            job.save(update_fields=["status", "error"])
+            return
+
+    job.status = "done"
+    job.save(update_fields=["status"])

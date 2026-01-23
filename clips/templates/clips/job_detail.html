@@ -704,13 +704,94 @@
 
     <div class="card">
       <div class="clips-header">
-        <h3>Clips</h3>
+        <h3>{% if job.job_type == "story" %}História{% else %}Clips{% endif %}</h3>
         {% if job.status != "done" and job.status != "error" %}
           <span class="progress">Processando… atualiza a cada 3s</span>
         {% endif %}
       </div>
 
-      {% if job.processing_mode == "full" %}
+      {% if job.job_type == "story" %}
+        <div style="color:var(--muted);font-size:13px;margin-bottom:12px;">
+          <div><strong>Título:</strong> {{ job.title|default:"História" }}</div>
+          {% if total_story_duration %}
+            <div><strong>Duração total:</strong> {{ total_story_duration|floatformat:1 }}s</div>
+          {% endif %}
+        </div>
+        <form method="post"
+              action="{% url 'publish_story_job' job.id %}"
+              class="publish-form">
+          {% csrf_token %}
+          <div>
+            <label>Canal do YouTube</label>
+            <select name="youtube_channel"
+                    required
+                    style="width:100%;padding:8px 10px;border-radius:8px;
+                           border:1px solid var(--border);
+                           background:#0b1220;color:var(--text);font-size:13px;">
+              <option value="">Selecione o canal</option>
+              <option value="canal_principal">Canal Principal</option>
+              <option value="canal_bbb">Canal BBB</option>
+            </select>
+          </div>
+          <div>
+            <label for="story-title-{{ job.id }}">Título base do YouTube</label>
+            <input id="story-title-{{ job.id }}"
+                   name="title"
+                   placeholder="Ex: Minha história" />
+          </div>
+          <div>
+            <label for="story-description-{{ job.id }}">Descrição</label>
+            <textarea id="story-description-{{ job.id }}"
+                      name="description"
+                      placeholder="Inclua hashtags e CTA para Shorts"></textarea>
+          </div>
+          <div>
+            <label>Agendar publicação (opcional)</label>
+            <input type="datetime-local"
+                   name="publish_at"
+                   style="width:100%;padding:8px 10px;border-radius:8px;
+                          border:1px solid var(--border);
+                          background:#0b1220;color:var(--text);font-size:13px;">
+          </div>
+          <button type="submit"
+                  class="publish-button"
+                  {% if not youtube_ready %}disabled{% endif %}>
+            🚀 Publicar história no YouTube
+          </button>
+          <div class="publish-status">
+            {% if youtube_ready %}
+              YouTube conectado • PT1/PT2/PT3 serão publicados
+            {% else %}
+              YouTube não configurado • defina YOUTUBE_CLIENT_ID/SECRET
+            {% endif %}
+          </div>
+        </form>
+        {% if story_clips %}
+          <div class="clips-grid">
+            {% for s in story_clips %}
+              <div class="clip">
+                {% if s.video_path %}
+                  <video controls preload="metadata">
+                    <source src="/media/{{ s.video_path }}" type="video/mp4">
+                  </video>
+                {% endif %}
+                <div class="clip-body">
+                  <small>PT{{ s.part_number }}</small>
+                  <div class="clip-meta">
+                    <span>{{ s.status|capfirst }}</span>
+                    {% if s.duration_seconds %}
+                      <span>{{ s.duration_seconds|floatformat:1 }}s</span>
+                    {% endif %}
+                  </div>
+                  <small>{{ s.text|truncatechars:120 }}</small>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p style="color:var(--muted)">Nenhum clip ainda.</p>
+        {% endif %}
+      {% elif job.processing_mode == "full" %}
         <p style="color:var(--muted)">Este job foi configurado para baixar o vídeo completo.</p>
       {% elif job.clips.exists %}
         <div class="clips-grid">
