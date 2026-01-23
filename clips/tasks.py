@@ -25,13 +25,20 @@ from .models import (
     update_job_step,
     fail_running_steps,
 )
+from subtitles.subtitle_builder import fill_gaps, to_srt
 from .services import (
+    build_static_background_video,
+    build_words_timeline,
     download_video,
+    make_vertical_clip_with_captions,
     transcribe_with_words_to_file,
-    FFMPEG_BIN, pick_viral_windows_rich, pick_viral_windows,
+    FFMPEG_BIN,
+    pick_viral_windows_rich,
+    pick_viral_windows,
 )
 from .services.clip_service import generate_clips
 from .tasks_clips import render_clip, finalize_job
+from .text_story import build_transcript_from_text
 from .translator import translate_blueprint_to_cut_plan, generate_clip_sequence
 from .services.youtube_service import upload_clip_publication, upload_story_publication
 from subtitles.subtitle_builder import build_word_by_word_ass
@@ -562,6 +569,103 @@ def process_video_job(self, job_id: int):
             kickoff_pick_and_render.s(job.id).set(queue="clips_cpu")
         )
 
+    except Exception as e:
+        fail_running_steps(job.id, message=str(e))
+        job.status = "error"
+        job.error = str(e)
+        job.save(update_fields=["status", "error"])
+        raise
+
+
+def _text_story_duration(transcript: dict) -> float:
+    segments = transcript.get("segments", [])
+    if not segments:
+        return 0.0
+    return max(float(seg.get("end", 0.0)) for seg in segments)
+
+
+def _write_word_srt(transcript: dict, output_path: Path) -> Path:
+    duration = _text_story_duration(transcript)
+    words_timeline = build_words_timeline(transcript, 0.0, duration)
+    segments = [
+        {"start": w["start"], "end": w["end"], "text": w["word"]}
+        for w in words_timeline
+    ]
+    segments = fill_gaps(segments)
+    srt_text = to_srt(segments)
+    output_path.write_text(srt_text, encoding="utf-8")
+    return output_path
+
+
+@shared_task(bind=True)
+def process_text_story_job(self, job_id: int, part_text: str):
+    job = VideoJob.objects.get(id=job_id)
+    media_root = Path(settings.MEDIA_ROOT)
+
+    try:
+        ensure_job_steps(job)
+
+        update_job_step(job.id, "download", "running")
+        job.status = "downloading"
+        job.save(update_fields=["status"])
+        update_job_step(job.id, "download", "done")
+
+        update_job_step(job.id, "transcription", "running")
+        job.status = "transcribing"
+        job.save(update_fields=["status"])
+
+        transcript = build_transcript_from_text(part_text)
+        transcript_path = media_root / "transcripts" / f"{job.id}.json"
+        transcript_path.parent.mkdir(exist_ok=True)
+        transcript_path.write_text(json.dumps(transcript, ensure_ascii=False), encoding="utf-8")
+        job.transcript_path = str(transcript_path)
+        job.transcript_data = transcript
+        job.save(update_fields=["transcript_path", "transcript_data"])
+        update_job_step(job.id, "transcription", "done")
+
+        update_job_step(job.id, "render", "running")
+        job.status = "clipping"
+        job.save(update_fields=["status"])
+
+        duration = _text_story_duration(transcript)
+        if duration <= 0:
+            raise RuntimeError("Transcript duration inválida para story text")
+
+        subs_dir = media_root / "subs"
+        subs_dir.mkdir(parents=True, exist_ok=True)
+        srt_path = subs_dir / f"text_story_{job.id}.srt"
+        _write_word_srt(transcript, srt_path)
+
+        bg_dir = media_root / "text_story"
+        bg_path = bg_dir / f"bg_{job.id}.mp4"
+        build_static_background_video(duration=duration, output_path=bg_path)
+
+        clip = VideoClip.objects.create(
+            job=job,
+            start=0.0,
+            end=duration,
+            score=1.0,
+            caption=job.title or "",
+            output_path="",
+        )
+
+        out_mp4, caption = make_vertical_clip_with_captions(
+            video_path=str(bg_path),
+            start=0.0,
+            end=duration,
+            subtitle_path=str(srt_path),
+            media_root=media_root,
+            clip_id=str(clip.id),
+        )
+
+        clip.output_path = out_mp4
+        clip.caption = caption or job.title or ""
+        clip.save(update_fields=["output_path", "caption"])
+
+        update_job_step(job.id, "render", "done")
+        update_job_step(job.id, "finalize", "done")
+        job.status = "done"
+        job.save(update_fields=["status"])
     except Exception as e:
         fail_running_steps(job.id, message=str(e))
         job.status = "error"
