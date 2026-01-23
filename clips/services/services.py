@@ -690,6 +690,44 @@ def make_vertical_clip_with_focus(
         print("[RENDER] ⚠️ fallback render retry")
         subprocess.check_call(fallback_cmd)
 
+
+def build_static_background_video(
+    duration: float,
+    output_path: Path,
+    color: str = "#0f172a",
+) -> Path:
+    ensure_dir(output_path.parent)
+    cmd = [
+        FFMPEG_BIN,
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        f"color=c={color}:s=1080x1920:d={duration}",
+        "-f",
+        "lavfi",
+        "-i",
+        "anullsrc=channel_layout=stereo:sample_rate=44100",
+        "-shortest",
+        "-r",
+        "30",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "20",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        str(output_path),
+    ]
+    subprocess.check_call(cmd)
+    return output_path
+
 def transcribe_with_words_to_file(
     video_path: str,
     output_path: str,
