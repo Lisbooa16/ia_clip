@@ -15,6 +15,12 @@ from django.utils.dateparse import parse_datetime
 from django.utils.timezone import make_aware, get_current_timezone
 from datetime import timezone
 
+def _parse_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
 def home(request):
     if request.method == "POST":
         url = request.POST.get("url", "").strip()
@@ -165,6 +171,40 @@ def reprocess_clip(request, clip_id):
     clip.save(update_fields=["output_path", "caption"])
 
     return redirect("job_detail", job_id=job.id)
+
+@require_POST
+def update_clip_edit(request, clip_id):
+    clip = get_object_or_404(VideoClip, id=clip_id)
+
+    edited_start = _parse_float(request.POST.get("edited_start"))
+    edited_end = _parse_float(request.POST.get("edited_end"))
+    caption_style = (request.POST.get("caption_style") or "").strip().lower()
+    if caption_style not in {"static", "word_by_word"}:
+        caption_style = clip.caption_style or "static"
+
+    caption_config = {
+        "font_family": (request.POST.get("font_family") or "").strip() or None,
+        "font_size": _parse_float(request.POST.get("font_size")),
+        "font_color": (request.POST.get("font_color") or "").strip() or None,
+        "highlight_color": (request.POST.get("highlight_color") or "").strip() or None,
+        "background": bool(request.POST.get("background")),
+        "position": (request.POST.get("position") or "").strip() or None,
+    }
+    caption_config = {k: v for k, v in caption_config.items() if v is not None}
+
+    clip.edited_start = edited_start
+    clip.edited_end = edited_end
+    clip.caption_style = caption_style
+    clip.caption_config = caption_config or None
+    clip.save(update_fields=[
+        "edited_start",
+        "edited_end",
+        "caption_style",
+        "caption_config",
+    ])
+
+    messages.success(request, "Edição do clip atualizada.")
+    return redirect("job_detail", job_id=clip.job_id)
 
 @require_POST
 def publish_clip_youtube(request, clip_id):
