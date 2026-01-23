@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from django.conf import settings
 from django.contrib import messages
 from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
@@ -5,8 +7,9 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST
 
 from .models import ClipPublication, VideoJob, VideoClip, get_job_progress
+from subtitles.subtitle_builder import build_subtitle_artifacts
+from .services import make_vertical_clip_with_captions
 from .tasks import process_video_job, publish_clip_to_youtube
-from .tasks_clips import render_clip_edit
 
 from django.utils.dateparse import parse_datetime
 from django.utils.timezone import make_aware, get_current_timezone
@@ -19,7 +22,35 @@ def _parse_float(value):
         return None
 
 def _render_clip_from_edit(clip: VideoClip) -> None:
-    render_clip_edit.apply_async(args=[clip.id], queue="clips_cpu")
+    job = clip.job
+    media_root = Path(settings.MEDIA_ROOT)
+    transcript = job.transcript_data
+    clip_start = clip.effective_start()
+    clip_end = clip.effective_end()
+    subs_dir = media_root / "subs"
+    subtitle_path, subtitle_style, subtitle_config = build_subtitle_artifacts(
+        transcript=transcript,
+        clip_start=clip_start,
+        clip_end=clip_end,
+        caption_style=clip.caption_style,
+        caption_config=clip.caption_config,
+        output_dir=subs_dir,
+        clip_id=str(clip.id),
+        suffix="_edit",
+    )
+    out_mp4, caption = make_vertical_clip_with_captions(
+        video_path=clip.source_video_path(),
+        start=clip_start,
+        end=clip_end,
+        subtitle_path=str(subtitle_path),
+        media_root=media_root,
+        clip_id=str(clip.id),
+        caption_style=subtitle_style,
+        caption_config=subtitle_config.__dict__,
+    )
+    clip.output_path = out_mp4
+    clip.caption = caption
+    clip.save(update_fields=["output_path", "caption"])
 
 def home(request):
     if request.method == "POST":
@@ -137,7 +168,6 @@ def job_progress(request, job_id):
 def reprocess_clip(request, clip_id):
     clip = get_object_or_404(VideoClip, id=clip_id)
     _render_clip_from_edit(clip)
-    messages.success(request, "Reprocessamento enfileirado.")
     return redirect("job_detail", job_id=clip.job_id)
 
 @require_POST
@@ -172,7 +202,7 @@ def update_clip_edit(request, clip_id):
     ])
 
     _render_clip_from_edit(clip)
-    messages.success(request, "Edição salva. Reprocessamento enfileirado.")
+    messages.success(request, "Clip reprocessado com a nova edição.")
     return redirect("job_detail", job_id=clip.job_id)
 
 @require_POST
