@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 from django.conf import settings
 from django.contrib import messages
@@ -8,7 +9,8 @@ from django.views.decorators.http import require_POST
 
 from .models import ClipPublication, VideoJob, VideoClip, get_job_progress
 from .services import make_vertical_clip_with_captions
-from .tasks import process_video_job, publish_clip_to_youtube
+from .tasks import process_text_story_job, process_video_job, publish_clip_to_youtube
+from .text_story import split_story_text
 
 from django.utils.dateparse import parse_datetime
 from django.utils.timezone import make_aware, get_current_timezone
@@ -34,6 +36,51 @@ def home(request):
 
     jobs = VideoJob.objects.order_by("-created_at")[:20]
     return render(request, "clips/home.html", {"jobs": jobs})
+
+
+def text_story_create(request):
+    if request.method == "POST":
+        story_text = request.POST.get("story_text", "").strip()
+        story_title = request.POST.get("story_title", "").strip()
+        max_duration_raw = request.POST.get("max_duration", "").strip()
+        max_duration = 55.0
+        if max_duration_raw:
+            try:
+                max_duration = float(max_duration_raw)
+            except ValueError:
+                max_duration = 55.0
+        max_duration = max(30.0, min(max_duration, 90.0))
+
+        if not story_text:
+            messages.error(request, "Informe o texto da história.")
+            return redirect("text_story_create")
+
+        parts = split_story_text(story_text, max_duration_s=max_duration)
+        if not parts:
+            messages.error(request, "Texto inválido para dividir em partes.")
+            return redirect("text_story_create")
+
+        jobs = []
+        base_title = story_title or "Text Story"
+        for part in parts:
+            job = VideoJob.objects.create(
+                url="https://text.story.local/",
+                language="pt",
+                processing_mode="clips",
+                status="pending",
+                title=f"{base_title} PT{part.index}",
+                source="text_story",
+            )
+            process_text_story_job.apply_async(
+                args=[job.id, part.text],
+                queue="clips_cpu",
+            )
+            jobs.append(job)
+
+        messages.success(request, f"{len(jobs)} partes enfileiradas para render.")
+        return redirect("job_detail", job_id=jobs[0].id)
+
+    return render(request, "clips/text_story_create.html")
 
 def publishing_guide(request):
     publishing = settings.SOCIAL_PUBLISHING
@@ -163,6 +210,13 @@ def publish_clip_youtube(request, clip_id):
     if not title:
         messages.error(request, "Informe um título para publicar no YouTube.")
         return redirect("job_detail", job_id=job.id)
+
+    if job.source == "text_story" and job.title:
+        match = re.search(r"\bPT(\d+)\b", job.title, re.IGNORECASE)
+        if match:
+            pt_label = f"PT{match.group(1)}"
+            if pt_label.lower() not in title.lower():
+                title = f"{title} {pt_label}".strip()
 
     channels = settings.SOCIAL_PUBLISHING.get("youtube", {}).get("channels", {})
     if youtube_channel not in channels:
