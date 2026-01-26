@@ -135,7 +135,7 @@ SOCIAL_PUBLISHING = {
             "canal_principal": {
                 "client_id": '6270987822-5qle9rv88ttmiii9s66kdokm7voh36sr.apps.googleusercontent.com',
                 "client_secret": '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',
-                "refresh_token": '1//0hk53ZUehMbWtCgYIARAAGBESNwF-L9Irq9svXzuA2Q5EXcRaK8pKp6NW7hHD2x3rwjUdOG6ALc4HAnoMwq50VA2bUdO4fP3oGMA',
+                "refresh_token": '1//0hNzBPsAWOQZ3CgYIARAAGBESNwF-L9IrKEr0OURfTNim_iPxgeAHso1qbCe1AnPPHwMnLhQqmLKsu5LkVaJm8_KMD7pTu_qekJY',
                 "note": "OAuth obrigatório (não existe upload só com API key).",
             },
             "canal_bbb": {

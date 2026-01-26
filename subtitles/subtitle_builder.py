@@ -147,6 +147,22 @@ def _apply_font_override(text, target_size):
     return f"{{\\fs{target_size}}}{text}"
 
 
+def _color_from_ass(value: str) -> pysubs2.Color:
+    if hasattr(pysubs2.Color, "from_ass"):
+        return pysubs2.Color.from_ass(value)
+    raw = value.strip()
+    if raw.startswith("&H"):
+        raw = raw[2:]
+    raw = raw.upper()
+    if len(raw) == 6:
+        aa = "00"
+        bb, gg, rr = raw[0:2], raw[2:4], raw[4:6]
+    else:
+        raw = raw.zfill(8)
+        aa, bb, gg, rr = raw[0:2], raw[2:4], raw[4:6], raw[6:8]
+    return pysubs2.Color(int(rr, 16), int(gg, 16), int(bb, 16), int(aa, 16))
+
+
 def to_srt(segments):
     def ts(t):
         ms = int(t * 1000)
@@ -210,15 +226,20 @@ def build_word_by_word_ass(
     words: list[dict],
     config: CaptionStyleConfig,
     out_ass_path: str,
+    secondary_alpha: str = "00",
+    clip_duration: float | None = None,
+    play_res: tuple[int, int] = (1080, 1920),
 ):
     subs = pysubs2.SSAFile()
+    subs.info["PlayResX"] = str(play_res[0])
+    subs.info["PlayResY"] = str(play_res[1])
     style = pysubs2.SSAStyle()
     style.fontname = config.font_family
     style.fontsize = max(24, int(config.font_size))
-    style.primarycolor = pysubs2.Color.from_ass(to_ass_color(config.highlight_color))
-    style.secondarycolor = pysubs2.Color.from_ass(to_ass_color(config.font_color))
-    style.outlinecolor = pysubs2.Color.from_ass("&H00000000")
-    style.backcolor = pysubs2.Color.from_ass(
+    style.primarycolor = _color_from_ass(to_ass_color(config.highlight_color))
+    style.secondarycolor = _color_from_ass(to_ass_color(config.font_color, secondary_alpha))
+    style.outlinecolor = _color_from_ass("&H00000000")
+    style.backcolor = _color_from_ass(
         to_ass_color("#000000", "80" if config.background else "00")
     )
     style.bold = True
@@ -232,49 +253,51 @@ def build_word_by_word_ass(
     style.borderstyle = 3 if config.background else 1
     subs.styles["Karaoke"] = style
 
-    phrases = []
-    buf = []
-    start = None
-    end = None
-    char_count = 0
-
-    for w in words:
-        word = (w.get("word") or "").strip()
-        if not word:
+    raw_tokens = [str(w.get("word") or "").strip() for w in words]
+    words_list = []
+    for token in raw_tokens:
+        if not token:
             continue
-        if start is None:
-            start = w["start"]
-        end = w["end"]
-        char_count += len(word) + (1 if buf else 0)
-        buf.append(w)
-        duration = end - start
-        if duration >= 2.4 or char_count >= 28 or re.search(r"[.!?]$", word):
-            phrases.append((buf, start, end))
-            buf = []
-            start = None
-            end = None
-            char_count = 0
+        words_list.extend([t for t in token.split() if t])
+    if not words_list:
+        words_list = ["."]
 
-    if buf and start is not None and end is not None:
-        phrases.append((buf, start, end))
+    if clip_duration is None:
+        clip_duration = max((float(w.get("end", 0.0)) for w in words), default=0.0)
+    duration_ms = max(int(round(clip_duration * 1000)), 1)
+    total_words = len(words_list)
+    max_chars_per_line = 20
+    word_timeline = []
+    for idx, token in enumerate(words_list):
+        word_start_ms = int(idx * duration_ms / total_words)
+        word_end_ms = int((idx + 1) * duration_ms / total_words)
+        if idx == total_words - 1:
+            word_end_ms = duration_ms
+        if word_end_ms <= word_start_ms:
+            word_end_ms = min(word_start_ms + 1, duration_ms)
+        if len(token) <= max_chars_per_line:
+            word_timeline.append(
+                {
+                    "word": token,
+                    "start": word_start_ms,
+                    "end": word_end_ms,
+                }
+            )
+            continue
+        chunks = [token[i:i + max_chars_per_line] for i in range(0, len(token), max_chars_per_line)]
+        word_timeline.append(
+            {
+                "word": "\\N".join(chunks),
+                "start": word_start_ms,
+                "end": word_end_ms,
+            }
+        )
 
-    for phrase_words, phrase_start, phrase_end in phrases:
-        lines = _split_words_for_lines(phrase_words)
-        line_texts = []
-        for line in lines:
-            tokens = []
-            for w in line:
-                start_t = float(w["start"])
-                end_t = float(w["end"])
-                dur = max(end_t - start_t, 0.05)
-                dur_cs = max(int(round(dur * 100)), 1)
-                tokens.append(f"{{\\k{dur_cs}}}{w['word']}")
-            line_texts.append(" ".join(tokens))
-        text = "\\N".join(line_texts)
+    for item in word_timeline:
         event = pysubs2.SSAEvent(
-            start=int(math.floor(phrase_start * 1000)),
-            end=int(math.ceil(phrase_end * 1000)),
-            text=text,
+            start=item["start"],
+            end=item["end"],
+            text=item["word"],
             style="Karaoke",
         )
         subs.events.append(event)
@@ -306,7 +329,7 @@ def build_subtitle_artifacts(
     if style == CaptionStyle.WORD_BY_WORD:
         words = words_for_clip(transcript, clip_start, clip_end)
         out_path = output_dir / f"{clip_id}{suffix}.ass"
-        build_word_by_word_ass(words, config, str(out_path))
+        build_word_by_word_ass(words, config, str(out_path), clip_duration=clip_end - clip_start)
     else:
         segs = segments_for_clip(transcript["segments"], clip_start, clip_end)
         segs = fill_gaps(segs)

@@ -9,7 +9,9 @@ from django.conf import settings
 from subtitles.subtitle_builder import build_subtitle_artifacts
 from .domain.render_focus import average_face_box, compute_vertical_crop, find_focus_face, focus_blocks_for_clip
 from .models import VideoClip, VideoJob, ensure_job_steps, update_job_step
+from .services.clip_generator import merge_transcript_overlays
 from .services import make_vertical_clip_with_captions, make_vertical_clip_with_focus, FFMPEG_BIN
+from .services.thumbnail import generate_clip_thumbnail, insert_thumbnail_as_first_frame
 import subprocess
 import time
 
@@ -53,7 +55,16 @@ def render_clip_edit(self, clip_id: int):
 
     clip.output_path = out_mp4
     clip.caption = caption
-    clip.save(update_fields=["output_path", "caption"])
+    thumb_path = _maybe_generate_thumbnail(
+        out_mp4,
+        max(0.0, min(1.0, clip_end - clip_start - 0.1)),
+        clip.id,
+    )
+    if thumb_path:
+        clip.thumbnail_path = thumb_path
+        clip.save(update_fields=["output_path", "caption", "thumbnail_path"])
+    else:
+        clip.save(update_fields=["output_path", "caption"])
     return out_mp4
 
 
@@ -69,28 +80,59 @@ def render_clip(
     role: str | None = None,
     anchor_start: float | None = None,  # ← NOVO parâmetro (pico de hook)
     anchor_end: float | None = None,    # ← NOVO parâmetro (fim do hook)
+    clip_id: int | None = None,
+    overlay_segments: list[dict] | None = None,
 ):
     media_root = Path(settings.MEDIA_ROOT)
     clip_dir = media_root / "clips" / str(job_id)
     clip_dir.mkdir(parents=True, exist_ok=True)
 
-    clip = VideoClip.objects.create(
-        job_id=job_id,
-        start=start,
-        end=end,
-        original_start=start,
-        original_end=end,
-        original_video_path=video_path,
-        score=score,
-        caption=role or "",
-        output_path="",
-    )
+    editorial_mode = clip_id is not None
+    if editorial_mode:
+        clip = VideoClip.objects.select_related("job").get(id=clip_id)
+        if clip.start != start or clip.end != end:
+            clip.start = start
+            clip.end = end
+        clip.original_start = start
+        clip.original_end = end
+        clip.original_video_path = video_path
+        clip.score = score
+        if role and not clip.caption:
+            clip.caption = role
+        clip.save(update_fields=[
+            "start",
+            "end",
+            "original_start",
+            "original_end",
+            "original_video_path",
+            "score",
+            "caption",
+        ])
+        job = clip.job
+        ensure_job_steps(job)
+        update_job_step(job.id, "render", "running")
+        job.status = "clipping"
+        job.save(update_fields=["status"])
+    else:
+        clip = VideoClip.objects.create(
+            job_id=job_id,
+            start=start,
+            end=end,
+            original_start=start,
+            original_end=end,
+            original_video_path=video_path,
+            score=score,
+            caption=role or "",
+            output_path="",
+        )
+        job = clip.job
 
     try:
         # 1️⃣ LEGENDA (como já fazia)
         subs_dir = media_root / "subs"
+        transcript_for_subs = merge_transcript_overlays(transcript, overlay_segments or [])
         srt_path, subtitle_style, subtitle_config = build_subtitle_artifacts(
-            transcript=transcript,
+            transcript=transcript_for_subs,
             clip_start=start,
             clip_end=end,
             caption_style=clip.caption_style,
@@ -101,11 +143,10 @@ def render_clip(
 
         # 2️⃣ CARREGA FOCO E FACES
         focus_path = clip_dir / "focus_timeline.json"
-        if not focus_path.exists():
-            raise RuntimeError("focus_timeline.json não encontrado")
-
-        with open(focus_path) as f:
-            focus_timeline = json.load(f)
+        focus_timeline = None
+        if focus_path.exists():
+            with open(focus_path) as f:
+                focus_timeline = json.load(f)
 
         faces_path = clip_dir / "faces_tracked.json"
         if faces_path.exists():
@@ -115,11 +156,13 @@ def render_clip(
             faces_tracked = []
 
         # 3️⃣ GERA FOCUS BLOCKS PARA O CLIP
-        focus_blocks = focus_blocks_for_clip(
-            focus_timeline,
-            start,
-            end
-        )
+        focus_blocks = []
+        if focus_timeline:
+            focus_blocks = focus_blocks_for_clip(
+                focus_timeline,
+                start,
+                end
+            )
 
         # Se não tiver focus blocks, mantém comportamento antigo (sem hook replay)
         if not focus_blocks:
@@ -135,7 +178,17 @@ def render_clip(
             )
             clip.output_path = out_mp4
             clip.caption = caption
-            clip.save(update_fields=["output_path", "caption"])
+            thumb_path = _maybe_generate_thumbnail(
+                out_mp4,
+                max(0.0, min(1.0, end - start - 0.1)),
+                clip.id,
+            )
+            if thumb_path:
+                clip.thumbnail_path = thumb_path
+                clip.save(update_fields=["output_path", "caption", "thumbnail_path"])
+            else:
+                clip.save(update_fields=["output_path", "caption"])
+            _maybe_insert_youtube_thumbnail(clip, job)
             return str(clip.id)
 
         print(f"[RENDER] 🎯 focus_blocks={len(focus_blocks)} clip_id={clip.id}")
@@ -635,7 +688,17 @@ def render_clip(
             subprocess.check_call(fallback_cmd)
 
         clip.output_path = str(final_out)
-        clip.save(update_fields=["output_path"])
+        thumb_path = _maybe_generate_thumbnail(
+            str(final_out),
+            max(0.0, min(1.0, end - start - 0.1)),
+            clip.id,
+        )
+        if thumb_path:
+            clip.thumbnail_path = thumb_path
+            clip.save(update_fields=["output_path", "thumbnail_path"])
+        else:
+            clip.save(update_fields=["output_path"])
+        _maybe_insert_youtube_thumbnail(clip, job)
 
     except Exception as e:
         update_job_step(job_id, "render", "failed", message=str(e))
@@ -643,7 +706,28 @@ def render_clip(
         clip.save(update_fields=["caption"])
         raise
 
+    if editorial_mode:
+        update_job_step(clip.job_id, "render", "done")
+        job.status = "done"
+        job.save(update_fields=["status"])
     return str(clip.id)
+
+
+def _maybe_generate_thumbnail(video_path: str, timestamp: float, clip_id: int) -> str | None:
+    output_path = Path(settings.MEDIA_ROOT) / "thumbnails" / f"{clip_id}.jpg"
+    return generate_clip_thumbnail(video_path, timestamp, output_path)
+
+
+def _maybe_insert_youtube_thumbnail(clip: VideoClip, job: VideoJob) -> None:
+    try:
+        if not job.url:
+            return
+        ok = insert_thumbnail_as_first_frame(clip.output_path, job.url)
+        if not ok:
+            return
+        clip.save(update_fields=["output_path"])
+    except Exception:
+        return
 
 
 @shared_task(bind=True)

@@ -1,9 +1,11 @@
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import time
 import uuid
+import wave
 from pathlib import Path
 import cv2
 from celery import shared_task, chord
@@ -21,6 +23,7 @@ from .models import (
     VideoJob,
     VideoClip,
     StoryClip,
+    ViralCandidate,
     ensure_job_steps,
     update_job_step,
     fail_running_steps,
@@ -37,14 +40,17 @@ from .services import (
     pick_viral_windows,
 )
 from .services.clip_service import generate_clips
+from .services.thumbnail import generate_clip_thumbnail
+from .services.analysis import split_transcript_into_candidates, score_candidate
 from .tasks_clips import render_clip, finalize_job
-from .text_story import build_transcript_from_text
+from .text_story import build_transcript_from_text, split_story_text, split_into_sentences
 from .translator import translate_blueprint_to_cut_plan, generate_clip_sequence
 from .services.youtube_service import upload_clip_publication, upload_story_publication
 from subtitles.subtitle_builder import build_word_by_word_ass
 from subtitles.caption_styles import CaptionStyleConfig, CaptionPosition
 import re
 import math
+from TTS.api import TTS
 
 def _faces_cache_key(video_path: str, fps_sample: int) -> str | None:
     try:
@@ -660,7 +666,16 @@ def process_text_story_job(self, job_id: int, part_text: str):
 
         clip.output_path = out_mp4
         clip.caption = caption or job.title or ""
-        clip.save(update_fields=["output_path", "caption"])
+        thumb_path = generate_clip_thumbnail(
+            out_mp4,
+            max(0.0, min(1.0, duration - 0.1)),
+            Path(settings.MEDIA_ROOT) / "thumbnails" / f"{clip.id}.jpg",
+        )
+        if thumb_path:
+            clip.thumbnail_path = thumb_path
+            clip.save(update_fields=["output_path", "caption", "thumbnail_path"])
+        else:
+            clip.save(update_fields=["output_path", "caption"])
 
         update_job_step(job.id, "render", "done")
         update_job_step(job.id, "finalize", "done")
@@ -702,6 +717,30 @@ def transcribe_video_gpu(self, job_id):
 
         print(f"[JOB {job.id}] Transcript salvo em arquivo")
         update_job_step(job.id, "transcription", "done")
+
+        # Candidate generation is tied to transcription, not face detection.
+        try:
+            transcript = json.loads(output_path.read_text(encoding="utf-8"))
+            ViralCandidate.objects.filter(video_job=job).delete()
+            candidates = split_transcript_into_candidates(transcript)
+            for candidate in candidates:
+                score, emotion, reason = score_candidate(
+                    candidate["text"],
+                    candidate["duration"],
+                )
+                ViralCandidate.objects.create(
+                    video_job=job,
+                    start_time=round(candidate["start"], 3),
+                    end_time=round(candidate["end"], 3),
+                    duration=round(candidate["duration"], 3),
+                    transcript_text=candidate["text"],
+                    viral_score=score,
+                    emotion=emotion,
+                    reason=reason,
+                )
+            print(f"[JOB {job.id}] Viral candidates gerados: {len(candidates)}")
+        except Exception as exc:
+            print(f"[JOB {job.id}] Falha ao gerar candidatos: {exc}")
 
         # ✅ RETORNO EXPLÍCITO (CRÍTICO)
         return {
@@ -1287,9 +1326,288 @@ def _build_story_words(text: str, duration_seconds: float) -> list[dict]:
 def _estimate_story_duration(text: str) -> float:
     words = [w for w in re.split(r"\\s+", text.strip()) if w]
     if not words:
-        return 8.0
-    seconds = max(8.0, min(len(words) * 0.35, 30.0))
+        return 0.0
+    seconds = len(words) / 2.5
     return round(seconds, 2)
+
+
+_TTS_ENGINE: TTS | None = None
+_TTS_MODEL_NAME = "tts_models/multilingual/multi-dataset/xtts_v2"
+_TTS_LANGUAGE = "pt"
+_TTS_SPEAKER_WAV = "C:/dev/clips_ia/media/voices/br_default.wav"
+
+
+
+def _get_tts_engine() -> TTS:
+    global _TTS_ENGINE
+    if _TTS_ENGINE is None:
+        _TTS_ENGINE = TTS(model_name=_TTS_MODEL_NAME, progress_bar=False, gpu=False)
+    return _TTS_ENGINE
+
+
+def _get_default_speaker(tts: TTS) -> str | None:
+    if not tts.is_multi_speaker:
+        return None
+    speakers = []
+    try:
+        speakers = list(tts.speakers or [])
+    except Exception:
+        speakers = []
+    if speakers:
+        return speakers[0]
+    return None
+
+
+def _get_speaker_wav() -> str | None:
+    if not _TTS_SPEAKER_WAV:
+        return None
+    path = Path(_TTS_SPEAKER_WAV)
+    if path.exists():
+        return str(path)
+    return None
+
+
+def _build_narration_script(text: str) -> str:
+    sentences = split_into_sentences(text)
+    if not sentences:
+        return ""
+    lines = []
+    if len(sentences) == 1:
+        lines.append(f"[HOOK][CTA] {sentences[0]}")
+        return "\n".join(lines)
+    for idx, sentence in enumerate(sentences):
+        if idx == 0:
+            lines.append(f"[HOOK] {sentence}")
+        elif idx == len(sentences) - 1:
+            lines.append(f"[CTA] {sentence}")
+        else:
+            lines.append(sentence)
+        if idx < len(sentences) - 1:
+            lines.append("[PAUSE 400]")
+    return "\n".join(lines)
+
+
+def _split_text_with_pauses(text: str) -> list[dict]:
+    pause_map = {
+        ".": 250,
+        ",": 150,
+        "!": 300,
+        "?": 300,
+        ":": 200,
+        ";": 200,
+    }
+    segments = []
+    buffer = []
+    for ch in text:
+        if ch in pause_map:
+            if buffer:
+                part = "".join(buffer).strip()
+                if part:
+                    segments.append({"type": "tts", "text": part})
+                buffer = []
+            segments.append({"type": "pause", "ms": pause_map[ch]})
+        else:
+            buffer.append(ch)
+    if buffer:
+        part = "".join(buffer).strip()
+        if part:
+            segments.append({"type": "tts", "text": part})
+    return segments
+
+
+def _parse_narration_script(script: str) -> list[dict]:
+    segments = []
+    for raw_line in script.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        tags = []
+        while line.startswith("[") and "]" in line:
+            tag = line[:line.index("]") + 1]
+            tags.append(tag)
+            line = line[len(tag):].strip()
+        if any(t.startswith("[PAUSE") for t in tags):
+            for tag in tags:
+                if tag.startswith("[PAUSE"):
+                    parts = tag.strip("[]").split()
+                    ms = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+                    if ms > 0:
+                        segments.append({"type": "pause", "ms": ms})
+            if line:
+                segments.append({"type": "tts", "mode": "normal", "text": line})
+            continue
+        mode = "normal"
+        if any(t == "[HOOK]" for t in tags):
+            mode = "hook"
+        if any(t == "[CTA]" for t in tags):
+            mode = "cta"
+        if line:
+            for item in _split_text_with_pauses(line):
+                if item["type"] == "pause":
+                    segments.append({"type": "pause", "ms": item["ms"]})
+                else:
+                    segments.append({"type": "tts", "mode": mode, "text": item["text"]})
+    return segments
+
+
+def _voice_params(mode: str) -> tuple[float, float, float]:
+    if mode == "hook":
+        return 0.9, 1.0, 1.0
+    if mode == "cta":
+        return 1.05, 1.0, 0.5
+    return 0.95, 1.0, 0.5
+
+
+def _wav_params(path: Path) -> tuple[int, int, int]:
+    with wave.open(str(path), "rb") as wf:
+        return wf.getframerate(), wf.getnchannels(), wf.getsampwidth()
+
+
+def _write_silence_wav(path: Path, duration_ms: int, rate: int, channels: int, sampwidth: int) -> None:
+    frames = int(rate * (duration_ms / 1000.0))
+    frame_bytes = b"\x00" * sampwidth * channels
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(sampwidth)
+        wf.setframerate(rate)
+        wf.writeframes(frame_bytes * frames)
+
+
+def _apply_audio_params(
+    input_path: Path,
+    output_path: Path,
+    speed: float,
+    volume: float,
+    pitch: float,
+    target_rate: int,
+    target_channels: int,
+) -> None:
+    if speed == 1.0 and volume == 1.0 and pitch == 0.0:
+        if input_path != output_path:
+            shutil.copyfile(input_path, output_path)
+        return
+    rate, _channels, _sampwidth = _wav_params(input_path)
+    pitch_factor = 2 ** (pitch / 12.0)
+    new_rate = max(int(rate * pitch_factor), 8000)
+    filters = [
+        f"asetrate={new_rate}",
+        f"aresample={rate}",
+        f"atempo={speed}",
+        f"volume={volume}",
+    ]
+    cmd = [
+        FFMPEG_BIN,
+        "-y",
+        "-i",
+        str(input_path),
+        "-filter:a",
+        ",".join(filters),
+        "-ac",
+        str(target_channels),
+        "-ar",
+        str(target_rate),
+        "-acodec",
+        "pcm_s16le",
+        str(output_path),
+    ]
+    subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _concat_wavs(paths: list[Path], output_path: Path, rate: int, channels: int, sampwidth: int) -> None:
+    with wave.open(str(output_path), "wb") as out:
+        out.setnchannels(channels)
+        out.setsampwidth(sampwidth)
+        out.setframerate(rate)
+        for path in paths:
+            with wave.open(str(path), "rb") as wf:
+                out.writeframes(wf.readframes(wf.getnframes()))
+
+
+def _build_tts_audio(text: str, output_path: Path) -> float:
+    tts = _get_tts_engine()
+    base_rate = int(getattr(tts.synthesizer, "output_sample_rate", 22050))
+    base_channels = 1
+    base_sampwidth = 2
+    script = _build_narration_script(text)
+    segments = _parse_narration_script(script)
+    if not segments:
+        raise RuntimeError("Script de narracao vazio.")
+
+    tmp_paths = []
+    cleanup_paths = []
+    seg_idx = 0
+    for seg in segments:
+        if seg["type"] == "pause":
+            pause_path = output_path.with_name(f"{output_path.stem}_pause_{seg_idx}.wav")
+            _write_silence_wav(pause_path, int(seg["ms"]), base_rate, base_channels, base_sampwidth)
+            tmp_paths.append(pause_path)
+            cleanup_paths.append(pause_path)
+            seg_idx += 1
+            continue
+        speed, volume, pitch = _voice_params(seg["mode"])
+        raw_path = output_path.with_name(f"{output_path.stem}_raw_{seg_idx}.wav")
+        try:
+            speaker = _get_default_speaker(tts)
+            speaker_wav = _get_speaker_wav()
+            if tts.is_multi_speaker and not speaker and not speaker_wav:
+                raise RuntimeError("Modelo multi-speaker sem speakers; defina TTS_SPEAKER_WAV.")
+            if tts.is_multi_lingual:
+                tts.tts_to_file(
+                    text=seg["text"],
+                    file_path=str(raw_path),
+                    language=_TTS_LANGUAGE,
+                    speaker=speaker,
+                    speaker_wav=speaker_wav,
+                )
+            else:
+                tts.tts_to_file(
+                    text=seg["text"],
+                    file_path=str(raw_path),
+                    speaker=speaker,
+                    speaker_wav=speaker_wav,
+                )
+        except Exception as exc:
+            languages = []
+            speakers = []
+            try:
+                languages = list(tts.languages) if tts.is_multi_lingual else []
+            except Exception:
+                languages = []
+            try:
+                speakers = list(tts.speakers) if tts.is_multi_speaker else []
+            except Exception:
+                speakers = []
+            print(
+                "[TTS] Error generating audio",
+                f"model={_TTS_MODEL_NAME}",
+                f"language={_TTS_LANGUAGE}",
+                f"available_languages={languages}",
+                f"available_speakers={speakers}",
+                f"error={exc}",
+            )
+            raise
+        tuned_path = output_path.with_name(f"{output_path.stem}_seg_{seg_idx}.wav")
+        _apply_audio_params(raw_path, tuned_path, speed, volume, pitch, base_rate, base_channels)
+        tmp_paths.append(tuned_path)
+        cleanup_paths.extend([raw_path, tuned_path])
+        seg_idx += 1
+
+    _concat_wavs(tmp_paths, output_path, base_rate, base_channels, base_sampwidth)
+    for path in cleanup_paths:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+    return _wav_duration_seconds(output_path)
+
+
+def _wav_duration_seconds(path: Path) -> float:
+    with wave.open(str(path), "rb") as wf:
+        frames = wf.getnframes()
+        rate = wf.getframerate() or 0
+    if rate <= 0:
+        return 0.0
+    return round(frames / float(rate), 3)
 
 
 @shared_task(bind=True)
@@ -1299,7 +1617,7 @@ def process_story_job(self, job_id: int):
     job.save(update_fields=["status"])
 
     story_text = job.story_text or ""
-    parts = _split_story_parts(story_text)
+    parts = split_story_text(story_text)
     if not parts:
         job.status = "error"
         job.error = "Texto da história vazio."
@@ -1312,21 +1630,26 @@ def process_story_job(self, job_id: int):
         clips.append(StoryClip.objects.create(
             job=job,
             part_number=idx,
-            text=part,
+            text=part.text,
             status="pending",
         ))
 
     media_root = Path(settings.MEDIA_ROOT)
     subs_dir = media_root / "subs"
     subs_dir.mkdir(parents=True, exist_ok=True)
+    tts_dir = media_root / "tts"
+    tts_dir.mkdir(parents=True, exist_ok=True)
     output_dir = media_root / "videos" / "clips"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    for clip in clips:
+    for part, clip in zip(parts, clips):
         try:
             clip.status = "processing"
             clip.save(update_fields=["status"])
-            duration = _estimate_story_duration(clip.text)
+            audio_path = tts_dir / f"story_{job.id}_pt{clip.part_number}.wav"
+            duration = _build_tts_audio(clip.text, audio_path)
+            if duration <= 0:
+                raise RuntimeError("Duracao invalida do audio TTS.")
             words = _build_story_words(clip.text, duration)
             ass_path = subs_dir / f"story_{job.id}_pt{clip.part_number}.ass"
             config = CaptionStyleConfig(
@@ -1337,28 +1660,39 @@ def process_story_job(self, job_id: int):
                 background=True,
                 position=CaptionPosition.BOTTOM,
             )
-            build_word_by_word_ass(words, config, str(ass_path))
+            build_word_by_word_ass(
+                words,
+                config,
+                str(ass_path),
+                secondary_alpha="80",
+                clip_duration=duration,
+            )
 
             output_path = output_dir / f"story_{job.id}_pt{clip.part_number}.mp4"
             ass_filter = str(ass_path).replace("\\", "/").replace(":", "\\:")
             cmd = [
                 FFMPEG_BIN, "-y",
                 "-f", "lavfi",
-                "-i", f"color=c=black:s=1080x1920:d={duration}",
+                "-i", f"color=c=black:s=1080x1920:d={duration:.3f}",
+                "-i", str(audio_path),
                 "-vf", f"subtitles=filename='{ass_filter}'",
                 "-r", "30",
+                "-shortest",
                 "-pix_fmt", "yuv420p",
                 "-c:v", "libx264",
                 "-preset", "veryfast",
                 "-crf", "20",
+                "-c:a", "aac",
+                "-b:a", "128k",
                 str(output_path),
             ]
             subprocess.check_call(cmd)
 
             clip.video_path = str(output_path)
+            clip.audio_path = str(audio_path)
             clip.duration_seconds = duration
             clip.status = "done"
-            clip.save(update_fields=["video_path", "duration_seconds", "status"])
+            clip.save(update_fields=["video_path", "audio_path", "duration_seconds", "status"])
         except Exception as e:
             clip.status = "error"
             clip.error = str(e)

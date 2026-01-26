@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <title>Análise Viral • Job #{{ job.id }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #020617;
+      --border: #1e293b;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --primary: #22c55e;
+      --danger: #ef4444;
+      --warn: #ea580c;
+      --info: #38bdf8;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(circle at top, #020617, #020617);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 32px 16px;
+    }
+
+    .app {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 24px;
+      align-items: center;
+    }
+
+    header h1 {
+      font-size: 26px;
+      margin: 0 0 6px;
+    }
+
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      word-break: break-all;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .header-actions a,
+    .header-actions button {
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #0b1220;
+      color: var(--text);
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 13px;
+      text-decoration: none;
+    }
+
+    .header-actions .primary {
+      background: var(--primary);
+      color: #052e16;
+      border-color: transparent;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.4);
+    }
+
+    .messages {
+      display: grid;
+      gap: 10px;
+    }
+
+    .message {
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 13px;
+      border: 1px solid transparent;
+    }
+
+    .message.success {
+      background: #14532d;
+      border-color: #166534;
+      color: #dcfce7;
+    }
+
+    .message.error {
+      background: #3f1d1d;
+      border-color: #7f1d1d;
+      color: #fecaca;
+    }
+
+    .analysis-grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .analysis-player {
+      display: grid;
+      gap: 10px;
+    }
+
+    .analysis-player video {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: black;
+      border-radius: 12px;
+    }
+
+    .candidate-row {
+      display: grid;
+      grid-template-columns: 90px minmax(0, 1fr) 110px 170px;
+      gap: 12px;
+      align-items: center;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #0b1220;
+      font-size: 13px;
+    }
+
+    .candidate-row.head {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 11px;
+      padding: 0 12px;
+    }
+
+    .score {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 700;
+    }
+
+    .score-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .score-high .score-dot { background: var(--primary); }
+    .score-mid .score-dot { background: var(--warn); }
+    .score-low .score-dot { background: var(--danger); }
+
+    .candidate-meta {
+      display: grid;
+      gap: 6px;
+    }
+
+    .candidate-meta .preview-text {
+      color: var(--muted);
+      line-height: 1.35;
+    }
+
+    .candidate-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .candidate-actions button {
+      flex: 1;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #111827;
+      color: var(--text);
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .candidate-actions .primary {
+      background: #2563eb;
+      border-color: transparent;
+      color: #eff6ff;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #0f172a;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .reason {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    @media (max-width: 900px) {
+      .candidate-row {
+        grid-template-columns: 1fr;
+      }
+
+      .candidate-row.head {
+        display: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+    <header>
+      <div>
+        <h1>Análise Viral</h1>
+        <p>Job #{{ job.id }}{% if job.url %} • {{ job.url }}{% endif %}</p>
+      </div>
+      <div class="header-actions">
+        <a href="{% url 'job_detail' job.id %}">Voltar ao job</a>
+        <form method="post" action="{% url 'analysis_run' job.id %}">
+          {% csrf_token %}
+          <button type="submit" class="primary" {% if not transcript_ready %}disabled{% endif %}>
+            Rodar análise
+          </button>
+        </form>
+      </div>
+    </header>
+
+    {% if messages %}
+      <div class="card messages">
+        {% for message in messages %}
+          <div class="message {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <div class="card analysis-grid">
+      <div class="analysis-player">
+        <strong>Preview</strong>
+        {% if job.original_path %}
+          <video id="preview-video" controls preload="metadata">
+            <source src="/media/{{ job.original_path }}" type="video/mp4">
+          </video>
+          <small class="preview-text" id="preview-label">
+            Selecione um candidato para ver o trecho.
+          </small>
+        {% else %}
+          <p class="preview-text">Vídeo original indisponível.</p>
+        {% endif %}
+      </div>
+
+      <div class="candidate-row head">
+        <div>Score</div>
+        <div>Trecho</div>
+        <div>Emoção</div>
+        <div>Ações</div>
+      </div>
+
+      {% if candidates %}
+        {% for c in candidates %}
+          <div class="candidate-row {% if c.viral_score >= 75 %}score-high{% elif c.viral_score >= 50 %}score-mid{% else %}score-low{% endif %}">
+            <div class="score">
+              <span class="score-dot"></span>
+              {{ c.viral_score }}
+            </div>
+            <div class="candidate-meta">
+              <div><strong>{{ c.start_time|floatformat:1 }}s → {{ c.end_time|floatformat:1 }}s</strong></div>
+              <div class="preview-text">{{ c.transcript_text|truncatechars:160 }}</div>
+              <div class="reason">{{ c.reason }}</div>
+            </div>
+            <div>
+              <span class="pill">{{ c.emotion }}</span>
+            </div>
+            <div class="candidate-actions">
+              <button type="button"
+                      class="preview-button"
+                      data-start="{{ c.start_time }}"
+                      data-end="{{ c.end_time }}">
+                Preview
+              </button>
+              <form method="post" action="{% url 'analysis_generate_clip' %}">
+                {% csrf_token %}
+                <input type="hidden" name="candidate_id" value="{{ c.id }}">
+                <button type="submit" class="primary">Create Clip</button>
+              </form>
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="preview-text">Nenhum candidato gerado ainda.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <script>
+    const previewVideo = document.getElementById("preview-video");
+    const previewLabel = document.getElementById("preview-label");
+    let previewEnd = null;
+
+    function attachPreviewHandlers() {
+      const buttons = document.querySelectorAll(".preview-button");
+      buttons.forEach(btn => {
+        btn.addEventListener("click", () => {
+          if (!previewVideo) return;
+          const start = Number(btn.dataset.start || 0);
+          const end = Number(btn.dataset.end || 0);
+          previewEnd = end;
+          previewVideo.currentTime = Math.max(0, start);
+          previewVideo.play();
+          if (previewLabel) {
+            previewLabel.textContent = `Preview ${start.toFixed(1)}s → ${end.toFixed(1)}s`;
+          }
+        });
+      });
+    }
+
+    if (previewVideo) {
+      previewVideo.addEventListener("timeupdate", () => {
+        if (previewEnd && previewVideo.currentTime >= previewEnd) {
+          previewVideo.pause();
+        }
+      });
+    }
+
+    attachPreviewHandlers();
+  </script>
+</body>
+</html>

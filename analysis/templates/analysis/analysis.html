@@ -269,75 +269,6 @@
                                         </div>
                                     {% endif %}
 
-                                    <!-- 🔥 FORMULÁRIO AJUSTADO COM MODO VIRAL/MANUAL -->
-                                    <form method="post" action="{% url 'analysis_generate_clip' %}" class="generate-form" id="generateForm{{ forloop.counter }}">
-                                        {% csrf_token %}
-                                        <input type="hidden" name="url" value="{{ url }}">
-
-                                        <!-- Seletor de Modo -->
-                                        <div class="mode-selector">
-                                            <div class="mode-option">
-                                                <input type="radio" name="mode" value="viral" id="viral{{ forloop.counter }}" checked onchange="toggleMode({{ forloop.counter }}, 'viral')">
-                                                <label for="viral{{ forloop.counter }}" class="mode-label">
-                                                    <div class="mode-title">🚀 Viral Automático</div>
-                                                    <div class="mode-desc">IA detecta os melhores hooks</div>
-                                                </label>
-                                            </div>
-                                            <div class="mode-option">
-                                                <input type="radio" name="mode" value="manual" id="manual{{ forloop.counter }}" onchange="toggleMode({{ forloop.counter }}, 'manual')">
-                                                <label for="manual{{ forloop.counter }}" class="mode-label">
-                                                    <div class="mode-title">📝 Manual (Blueprint)</div>
-                                                    <div class="mode-desc">Você define a estrutura</div>
-                                                </label>
-                                            </div>
-                                        </div>
-
-                                        <!-- Opções Virais -->
-                                        <div id="viralOptions{{ forloop.counter }}" class="profile-selector">
-                                            <label for="profile{{ forloop.counter }}">Perfil do Vídeo</label>
-                                            <select name="profile" id="profile{{ forloop.counter }}">
-                                                <option value="podcast">🎙️ Podcast / Entrevista</option>
-                                                <option value="yt_game">🎮 Gaming / YouTube</option>
-                                                <option value="irl">🎥 IRL / Vlog</option>
-                                            </select>
-                                        </div>
-
-                                        <!-- Campos Blueprint (escondidos por padrão) -->
-                                        <div id="blueprintFields{{ forloop.counter }}" class="blueprint-fields">
-                                            <div class="idea-field">
-                                                <label>Ideia Central</label>
-                                                <input type="text" name="idea" value="{{ decision.idea }}" placeholder="Ex: O segredo da produtividade">
-                                            </div>
-                                            <div class="blueprint-grid">
-                                                <div class="blueprint-field">
-                                                    <label>Opening</label>
-                                                    <textarea name="opening" rows="2">{{ decision.blueprint.opening }}</textarea>
-                                                </div>
-                                                <div class="blueprint-field">
-                                                    <label>Setup</label>
-                                                    <textarea name="setup" rows="2">{{ decision.blueprint.setup }}</textarea>
-                                                </div>
-                                                <div class="blueprint-field">
-                                                    <label>Context</label>
-                                                    <textarea name="context" rows="2">{{ decision.blueprint.context }}</textarea>
-                                                </div>
-                                                <div class="blueprint-field">
-                                                    <label>Tension</label>
-                                                    <textarea name="tension" rows="2">{{ decision.blueprint.tension }}</textarea>
-                                                </div>
-                                                <div class="blueprint-field">
-                                                    <label>Reveal</label>
-                                                    <textarea name="reveal" rows="2">{{ decision.blueprint.reveal }}</textarea>
-                                                </div>
-                                                <div class="blueprint-field">
-                                                    <label>Ending</label>
-                                                    <textarea name="ending" rows="2">{{ decision.ending }}</textarea>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <button type="submit" class="generate-clip">Gerar clips agora</button>
-                                    </form>
                                 {% endif %}
                                 {% with blueprint_text="Abertura: "|add:decision.blueprint.opening|add:"\nSetup: "|add:decision.blueprint.setup|add:"\nContexto: "|add:decision.blueprint.context|add:"\nTensão: "|add:decision.blueprint.tension|add:"\nRevelação: "|add:decision.blueprint.reveal|add:"\nFinal: "|add:decision.ending %}
                                     <button class="copy-blueprint" data-blueprint="{{ blueprint_text|escapejs }}">Copiar blueprint</button>
@@ -372,20 +303,6 @@
         {% endif %}
     </div>
     <script>
-        // Toggle entre modo Viral e Manual
-        function toggleMode(formId, mode) {
-            const viralOptions = document.getElementById('viralOptions' + formId);
-            const blueprintFields = document.getElementById('blueprintFields' + formId);
-
-            if (mode === 'viral') {
-                viralOptions.style.display = 'block';
-                blueprintFields.classList.remove('active');
-            } else {
-                viralOptions.style.display = 'none';
-                blueprintFields.classList.add('active');
-            }
-        }
-
         // Copiar blueprint
         document.querySelectorAll('.copy-blueprint').forEach((button) => {
             button.addEventListener('click', async () => {

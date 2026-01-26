@@ -44,7 +44,7 @@
     }
 
     header h1 {
-      font-size: 26px;
+      font-size: 28px;
       margin: 0 0 6px;
     }
 
@@ -53,6 +53,43 @@
       color: var(--muted);
       font-size: 14px;
       word-break: break-all;
+    }
+
+    .header-status {
+      display: grid;
+      gap: 10px;
+      align-items: center;
+      min-width: 220px;
+    }
+
+    .analysis-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #0b1220;
+      color: var(--text);
+      font-weight: 700;
+      font-size: 12px;
+      text-decoration: none;
+    }
+
+    .header-status .status {
+      justify-self: end;
+    }
+
+    .progress-wrap {
+      display: grid;
+      gap: 6px;
+    }
+
+    .progress-inline {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--muted);
     }
 
     .status {
@@ -68,6 +105,7 @@
     .downloading { background: var(--info); }
     .transcribing { background: var(--purple); }
     .clipping { background: var(--warn); }
+    .processing { background: var(--warn); }
     .done { background: var(--primary); color: #052e16; }
     .error { background: var(--danger); }
 
@@ -78,6 +116,12 @@
       padding: 20px;
       margin-bottom: 24px;
       box-shadow: 0 10px 30px rgba(0,0,0,.4);
+    }
+
+    .card-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin: 0;
     }
 
     .meta {
@@ -109,6 +153,11 @@
       margin-bottom: 14px;
     }
 
+    .clips-header h3 {
+      font-size: 16px;
+      margin: 0;
+    }
+
     .full-video video {
       width: 100%;
       aspect-ratio: 16 / 9;
@@ -137,6 +186,47 @@
       gap: 16px;
     }
 
+    .clip-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .clip-row {
+      display: grid;
+      grid-template-columns: 90px 1fr 120px 160px;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #0b1220;
+      font-size: 13px;
+    }
+
+    .clip-row:hover {
+      border-color: #334155;
+      background: #0f172a;
+    }
+
+    .clip-row.head {
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 11px;
+      padding: 0 12px;
+    }
+
+    .clip-label {
+      font-weight: 700;
+    }
+
+    .clip-row .status {
+      padding: 4px 10px;
+      font-size: 11px;
+    }
+
     .clip {
       background: #020617;
       border: 1px solid var(--border);
@@ -144,6 +234,30 @@
       overflow: hidden;
       display: flex;
       flex-direction: column;
+    }
+
+    .clip:hover {
+      border-color: #334155;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.35);
+    }
+
+    .clip-preview {
+      position: relative;
+    }
+
+    .clip-preview::after {
+      content: "Preview";
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.75);
+      border: 1px solid var(--border);
+      color: var(--text);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
     }
 
     .clip video {
@@ -372,10 +486,57 @@
       }
     }
 
+    @media (max-width: 760px) {
+      .clip-row {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .clip-row.head {
+        display: none;
+      }
+    }
+
     .publish-form {
-      margin-top: 10px;
+      margin-top: 12px;
       display: grid;
       gap: 8px;
+    }
+
+    .publish-form + .publish-form {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px dashed var(--border);
+    }
+
+    .publish-card {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }
+
+    .publish-card .publish-form {
+      margin-top: 0;
+      background: #0b1220;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      height: 100%;
+    }
+
+    .publish-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 4px;
+    }
+
+    .publish-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin: 0;
     }
 
     .publish-form label {
@@ -568,10 +729,30 @@
 
     <header>
       <div>
-        <h1>Job #{{ job.id }}</h1>
-        <p>{{ job.url }}</p>
+        <h1>
+          {% if job.title %}
+            {{ job.title }}
+          {% elif job.job_type == "story" %}
+            Hist¢ria
+          {% else %}
+            Job #{{ job.id }}
+          {% endif %}
+        </h1>
+        <p>Job #{{ job.id }}{% if job.url %}  {{ job.url }}{% endif %}</p>
       </div>
-      <span class="status {{ job.status }}">{{ job.status }}</span>
+      <div class="header-status">
+        <span class="status {{ job.status }}">{{ job.status }}</span>
+        <a class="analysis-link" href="{% url 'analysis_view' job.id %}">Análise Viral</a>
+        <div class="progress-wrap">
+          <div class="progress-bar">
+            <div id="progress-bar"></div>
+          </div>
+          <div class="progress-inline">
+            <span id="progress-status">Carregando.</span>
+            <span id="progress-percent">0%</span>
+          </div>
+        </div>
+      </div>
     </header>
 
     <div class="card">
@@ -605,18 +786,6 @@
         {% endfor %}
       </div>
     {% endif %}
-
-    <div class="card progress-card">
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <h3 style="margin:0;">Progresso</h3>
-        <span class="progress" id="progress-status">Carregando…</span>
-      </div>
-      <div class="progress-bar">
-        <div id="progress-bar"></div>
-      </div>
-      <div class="progress-meta" id="progress-meta"></div>
-      <div class="steps" id="progress-steps"></div>
-    </div>
 
     {% if job.error %}
       <div class="card error-box">
@@ -704,76 +873,216 @@
 
     <div class="card">
       <div class="clips-header">
-        <h3>{% if job.job_type == "story" %}História{% else %}Clips{% endif %}</h3>
+        <h3>Clips</h3>
         {% if job.status != "done" and job.status != "error" %}
-          <span class="progress">Processando… atualiza a cada 3s</span>
+          <span class="progress">Processando. atualiza a cada 3s</span>
         {% endif %}
       </div>
 
-      {% if job.job_type == "story" %}
-        <div style="color:var(--muted);font-size:13px;margin-bottom:12px;">
-          <div><strong>Título:</strong> {{ job.title|default:"História" }}</div>
-          {% if total_story_duration %}
-            <div><strong>Duração total:</strong> {{ total_story_duration|floatformat:1 }}s</div>
-          {% endif %}
+      <div class="clip-list">
+        <div class="clip-row head">
+          <div>Parte</div>
+          <div>Status</div>
+          <div>Duracao</div>
+          <div>Publicacao</div>
         </div>
-        <form method="post"
-              action="{% url 'publish_story_job' job.id %}"
-              class="publish-form">
-          {% csrf_token %}
-          <div>
-            <label>Canal do YouTube</label>
-            <select name="youtube_channel"
-                    required
-                    style="width:100%;padding:8px 10px;border-radius:8px;
-                           border:1px solid var(--border);
-                           background:#0b1220;color:var(--text);font-size:13px;">
-              <option value="">Selecione o canal</option>
-              <option value="canal_principal">Canal Principal</option>
-              <option value="canal_bbb">Canal BBB</option>
-            </select>
+        {% if job.job_type == "story" %}
+          {% if story_clips %}
+            {% for s in story_clips %}
+              <div class="clip-row">
+                <div class="clip-label">PT{{ s.part_number }}</div>
+                <div><span class="status {{ s.status }}">{{ s.status }}</span></div>
+                <div>{% if s.duration_seconds %}{{ s.duration_seconds|floatformat:1 }}s{% else %}-{% endif %}</div>
+                <div>
+                  {% if s.latest_publication %}
+                    {{ s.latest_publication.status|capfirst }}
+                  {% else %}
+                    -
+                  {% endif %}
+                </div>
+              </div>
+            {% endfor %}
+          {% else %}
+            <p style="color:var(--muted)">Nenhum clip ainda.</p>
+          {% endif %}
+        {% elif job.processing_mode == "full" %}
+          <div class="clip-row">
+            <div class="clip-label">PT1</div>
+            <div><span class="status {{ job.status }}">{{ job.status }}</span></div>
+            <div>-</div>
+            <div>-</div>
           </div>
-          <div>
-            <label for="story-title-{{ job.id }}">Título base do YouTube</label>
-            <input id="story-title-{{ job.id }}"
-                   name="title"
-                   placeholder="Ex: Minha história" />
-          </div>
-          <div>
-            <label for="story-description-{{ job.id }}">Descrição</label>
-            <textarea id="story-description-{{ job.id }}"
-                      name="description"
-                      placeholder="Inclua hashtags e CTA para Shorts"></textarea>
-          </div>
-          <div>
-            <label>Agendar publicação (opcional)</label>
-            <input type="datetime-local"
-                   name="publish_at"
-                   style="width:100%;padding:8px 10px;border-radius:8px;
-                          border:1px solid var(--border);
-                          background:#0b1220;color:var(--text);font-size:13px;">
-          </div>
-          <button type="submit"
-                  class="publish-button"
-                  {% if not youtube_ready %}disabled{% endif %}>
-            🚀 Publicar história no YouTube
-          </button>
-          <div class="publish-status">
-            {% if youtube_ready %}
-              YouTube conectado • PT1/PT2/PT3 serão publicados
-            {% else %}
-              YouTube não configurado • defina YOUTUBE_CLIENT_ID/SECRET
-            {% endif %}
-          </div>
-        </form>
+        {% elif job.clips.exists %}
+          {% for c in job.clips.all %}
+            <div class="clip-row">
+              <div class="clip-label">PT{{ forloop.counter }}</div>
+              <div><span class="status {{ job.status }}">{{ job.status }}</span></div>
+              <div>{% if c.duration_seconds %}{{ c.duration_seconds|floatformat:1 }}s{% else %}-{% endif %}</div>
+              <div>
+                {% if c.latest_publication %}
+                  {{ c.latest_publication.status|capfirst }}
+                {% else %}
+                  -
+                {% endif %}
+              </div>
+            </div>
+          {% endfor %}
+        {% else %}
+          <p style="color:var(--muted)">Nenhum clip ainda.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if job.job_type == "story" %}
+      <div class="card">
+        <div class="clips-header">
+          <h3>Publicacao</h3>
+        </div>
+        <div class="publish-card">
+          <form method="post"
+                action="{% url 'publish_story_job' job.id %}"
+                class="publish-form">
+            {% csrf_token %}
+            <div class="publish-header">
+              <p class="publish-title">Publicar historia completa</p>
+              <span class="status {{ job.status }}">{{ job.status }}</span>
+            </div>
+            <div>
+              <label>Canal do YouTube</label>
+              <select name="youtube_channel"
+                      required
+                      style="width:100%;padding:8px 10px;border-radius:8px;
+                             border:1px solid var(--border);
+                             background:#0b1220;color:var(--text);font-size:13px;">
+                <option value="">Selecione o canal</option>
+                <option value="canal_principal">Canal Principal</option>
+                <option value="canal_bbb">Canal BBB</option>
+              </select>
+            </div>
+            <div>
+              <label for="story-title-{{ job.id }}">Titulo base do YouTube</label>
+              <input id="story-title-{{ job.id }}"
+                     name="title"
+                     placeholder="Ex: Minha historia" />
+            </div>
+            <div>
+              <label for="story-description-{{ job.id }}">Descricao</label>
+              <textarea id="story-description-{{ job.id }}"
+                        name="description"
+                        placeholder="Inclua hashtags e CTA para Shorts"></textarea>
+            </div>
+            <div>
+              <label>Agendar publicacao (opcional)</label>
+              <input type="datetime-local"
+                     name="publish_at"
+                     style="width:100%;padding:8px 10px;border-radius:8px;
+                            border:1px solid var(--border);
+                            background:#0b1220;color:var(--text);font-size:13px;">
+            </div>
+            <button type="submit"
+                    class="publish-button"
+                    {% if not youtube_ready %}disabled{% endif %}>
+              Publicar historia no YouTube
+            </button>
+            <div class="publish-status">
+              {% if youtube_ready %}
+                YouTube conectado - PT1/PT2/PT3 serao publicados
+              {% else %}
+                YouTube nao configurado - defina YOUTUBE_CLIENT_ID/SECRET
+              {% endif %}
+            </div>
+          </form>
+        </div>
+      </div>
+    {% elif job.processing_mode != "full" and job.clips.exists %}
+      <div class="card">
+        <div class="clips-header">
+          <h3>Publicacao</h3>
+        </div>
+        <div class="publish-card">
+          {% for c in job.clips.all %}
+            <form method="post"
+                  action="{% url 'publish_clip_youtube' c.id %}"
+                  class="publish-form">
+              {% csrf_token %}
+              <div class="publish-header">
+                <p class="publish-title">PT{{ forloop.counter }}</p>
+                <span class="status {{ job.status }}">{{ job.status }}</span>
+              </div>
+              <div>
+                <label>Canal do YouTube</label>
+                <select name="youtube_channel"
+                        required
+                        style="width:100%;padding:8px 10px;border-radius:8px;
+                               border:1px solid var(--border);
+                               background:#0b1220;color:var(--text);font-size:13px;">
+                  <option value="">Selecione o canal</option>
+                  <option value="canal_principal">Canal Principal</option>
+                  <option value="canal_bbb">Canal BBB</option>
+                </select>
+              </div>
+              <div>
+                <label for="title-{{ c.id }}">Titulo do YouTube</label>
+                <input id="title-{{ c.id }}"
+                       name="title"
+                       required
+                       placeholder="Ex: O melhor momento do clip" />
+              </div>
+              <div>
+                <label for="description-{{ c.id }}">Descricao</label>
+                <textarea id="description-{{ c.id }}"
+                          name="description"
+                          placeholder="Inclua hashtags e CTA para Shorts"></textarea>
+              </div>
+              <div>
+                <label>Agendar publicacao (opcional)</label>
+                <input type="datetime-local"
+                       name="publish_at"
+                       style="width:100%;padding:8px 10px;border-radius:8px;
+                              border:1px solid var(--border);
+                              background:#0b1220;color:var(--text);font-size:13px;">
+              </div>
+              <button type="submit"
+                      class="publish-button"
+                      {% if not youtube_ready %}disabled{% endif %}>
+                Publicar no YouTube
+              </button>
+              <div class="publish-status">
+                {% if youtube_ready %}
+                  YouTube conectado - pronto para enfileirar
+                {% else %}
+                  YouTube nao configurado - defina YOUTUBE_CLIENT_ID/SECRET
+                {% endif %}
+              </div>
+              {% if c.latest_publication %}
+                <div class="publish-status">
+                  Ultima tentativa: {{ c.latest_publication.status|capfirst }}
+                  {% if c.latest_publication.external_url %}
+                    - <a href="{{ c.latest_publication.external_url }}" target="_blank">Ver</a>
+                  {% endif %}
+                </div>
+              {% endif %}
+            </form>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+
+    {% if job.job_type == "story" %}
+      <div class="card">
+        <div class="clips-header">
+          <h3>Clips gerados</h3>
+        </div>
         {% if story_clips %}
           <div class="clips-grid">
             {% for s in story_clips %}
               <div class="clip">
                 {% if s.video_path %}
-                  <video controls preload="metadata">
-                    <source src="/media/{{ s.video_path }}" type="video/mp4">
-                  </video>
+                  <div class="clip-preview">
+                    <video controls preload="metadata">
+                      <source src="/media/{{ s.video_path }}" type="video/mp4">
+                    </video>
+                  </div>
                 {% endif %}
                 <div class="clip-body">
                   <small>PT{{ s.part_number }}</small>
@@ -783,7 +1092,6 @@
                       <span>{{ s.duration_seconds|floatformat:1 }}s</span>
                     {% endif %}
                   </div>
-                  <small>{{ s.text|truncatechars:120 }}</small>
                 </div>
               </div>
             {% endfor %}
@@ -791,386 +1099,55 @@
         {% else %}
           <p style="color:var(--muted)">Nenhum clip ainda.</p>
         {% endif %}
-      {% elif job.processing_mode == "full" %}
-        <p style="color:var(--muted)">Este job foi configurado para baixar o vídeo completo.</p>
-      {% elif job.clips.exists %}
+      </div>
+    {% elif job.processing_mode != "full" and job.clips.exists %}
+      <div class="card">
+        <div class="clips-header">
+          <h3>Clips gerados</h3>
+        </div>
         <div class="clips-grid">
           {% for c in job.clips.all %}
             <div class="clip">
-              <video controls preload="metadata">
-                <source src="/media/{{ c.output_path }}?v={{ c.edited_start|default_if_none:'' }}-{{ c.edited_end|default_if_none:'' }}-{{ c.caption_style }}" type="video/mp4">
-              </video>
-
+              <div class="clip-preview">
+                <video controls preload="metadata">
+                  <source src="/media/{{ c.output_path }}?v={{ c.edited_start|default_if_none:'' }}-{{ c.edited_end|default_if_none:'' }}-{{ c.caption_style }}" type="video/mp4">
+                </video>
+              </div>
               <div class="clip-body">
                 <small>{{ c.caption }}</small>
-
                 <div class="clip-meta">
-                  <span>{{ c.start|floatformat:1 }}s → {{ c.end|floatformat:1 }}s</span>
+                  <span>{{ c.start|floatformat:1 }}s – {{ c.end|floatformat:1 }}s</span>
                   <span>score {{ c.score|floatformat:2 }}</span>
                 </div>
-
                 <div class="clip-actions">
-                  <a class="download"
-                     href="/media/{{ c.output_path }}"
-                     download>
-                    Download
-                  </a>
-
-                  <a class="open"
-                     href="/media/{{ c.output_path }}">
-                    Abrir
-                  </a>
-
-                  <form method="post"
-                        action="{% url 'reprocess_clip' c.id %}"
-                        style="flex:1">
-                    {% csrf_token %}
-                    <button type="submit"
-                            class="retry"
-                            style="width:100%;padding:8px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">
-                      🔁 Reprocessar
-                    </button>
-                  </form>
-
-                  <button type="button"
-                          class="clip-edit-button"
-                          data-modal-target="edit-modal-{{ c.id }}">
-                    ✂️ Editar
-                  </button>
+                  <a class="download" href="/media/{{ c.output_path }}" download>Download</a>
+                  <a class="open" href="/media/{{ c.output_path }}">Abrir</a>
                 </div>
-
-                <div class="edit-modal" id="edit-modal-{{ c.id }}" aria-hidden="true">
-                  <div class="backdrop" data-modal-close></div>
-                  <form method="post"
-                        action="{% url 'update_clip_edit' c.id %}"
-                        class="modal-card"
-                        data-edit-form="{{ c.id }}">
-                    {% csrf_token %}
-                    <div class="modal-header">
-                      <h4>Editar clip • {{ c.id }}</h4>
-                      <button type="button" class="secondary" data-modal-close>Fechar</button>
-                    </div>
-                    <div class="modal-body">
-                      <div class="edit-player">
-                        <video controls preload="metadata"
-                               data-edit-video="{{ c.id }}">
-                          <source src="/media/{{ c.output_path }}?v={{ c.edited_start|default_if_none:'' }}-{{ c.edited_end|default_if_none:'' }}-{{ c.caption_style }}" type="video/mp4">
-                        </video>
-                        <div class="timeline-controls" data-edit-controls="{{ c.id }}">
-                          <div class="time-readout">
-                            <span>Atual: <strong data-current-time="{{ c.id }}">0.00s</strong></span>
-                            <span>Frame: <strong data-frame-step="{{ c.id }}">1/30</strong></span>
-                          </div>
-                          <div class="timeline-actions">
-                            <button type="button" data-step="-1" data-clip-id="{{ c.id }}">◀ Frame</button>
-                            <button type="button" data-step="1" data-clip-id="{{ c.id }}">Frame ▶</button>
-                            <button type="button" data-set="start" data-clip-id="{{ c.id }}">Marcar início</button>
-                            <button type="button" data-set="end" data-clip-id="{{ c.id }}">Marcar fim</button>
-                          </div>
-                        </div>
-                      </div>
-                      <div class="edit-form">
-                        <div class="row">
-                          <div>
-                            <label for="edited-start-{{ c.id }}">Início (s)</label>
-                            <input id="edited-start-{{ c.id }}"
-                                   name="edited_start"
-                                   type="number"
-                                   step="0.01"
-                                   placeholder="{{ c.start|floatformat:2 }}"
-                                   value="{{ c.edited_start|default_if_none:'' }}"
-                                   data-edit-start="{{ c.id }}">
-                          </div>
-                          <div>
-                            <label for="edited-end-{{ c.id }}">Fim (s)</label>
-                            <input id="edited-end-{{ c.id }}"
-                                   name="edited_end"
-                                   type="number"
-                                   step="0.01"
-                                   placeholder="{{ c.end|floatformat:2 }}"
-                                   value="{{ c.edited_end|default_if_none:'' }}"
-                                   data-edit-end="{{ c.id }}">
-                          </div>
-                        </div>
-                        <div class="row">
-                          <div>
-                            <label for="caption-style-{{ c.id }}">Estilo da legenda</label>
-                            <select id="caption-style-{{ c.id }}" name="caption_style">
-                              <option value="static" {% if c.caption_style == "static" %}selected{% endif %}>Static</option>
-                              <option value="word_by_word" {% if c.caption_style == "word_by_word" %}selected{% endif %}>Word by word</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label for="position-{{ c.id }}">Posição</label>
-                            <select id="position-{{ c.id }}" name="position">
-                              <option value="bottom" {% if not c.caption_config or c.caption_config.position == "bottom" %}selected{% endif %}>Bottom</option>
-                              <option value="center" {% if c.caption_config.position == "center" %}selected{% endif %}>Center</option>
-                              <option value="top" {% if c.caption_config.position == "top" %}selected{% endif %}>Top</option>
-                            </select>
-                          </div>
-                        </div>
-                        <div class="row">
-                          <div>
-                            <label for="font-family-{{ c.id }}">Fonte</label>
-                            <input id="font-family-{{ c.id }}"
-                                   name="font_family"
-                                   placeholder="Montserrat"
-                                   value="{{ c.caption_config.font_family|default_if_none:'' }}">
-                          </div>
-                          <div>
-                            <label for="font-size-{{ c.id }}">Tamanho</label>
-                            <input id="font-size-{{ c.id }}"
-                                   name="font_size"
-                                   type="number"
-                                   step="1"
-                                   placeholder="44"
-                                   value="{{ c.caption_config.font_size|default_if_none:'' }}">
-                          </div>
-                        </div>
-                        <div class="row">
-                          <div>
-                            <label for="font-color-{{ c.id }}">Cor da fonte</label>
-                            <input id="font-color-{{ c.id }}"
-                                   name="font_color"
-                                   type="text"
-                                   placeholder="#FFFFFF"
-                                   value="{{ c.caption_config.font_color|default_if_none:'' }}">
-                          </div>
-                          <div>
-                            <label for="highlight-color-{{ c.id }}">Cor destaque</label>
-                            <input id="highlight-color-{{ c.id }}"
-                                   name="highlight_color"
-                                   type="text"
-                                   placeholder="#FFD84D"
-                                   value="{{ c.caption_config.highlight_color|default_if_none:'' }}">
-                          </div>
-                        </div>
-                        <label class="toggle">
-                          <input type="checkbox" name="background" {% if not c.caption_config or c.caption_config.background %}checked{% endif %}>
-                          Fundo ligado
-                        </label>
-                      </div>
-                    </div>
-                    <div class="modal-footer">
-                      <button type="button" class="secondary" data-modal-close>Cancelar</button>
-                      <button type="submit"
-                              class="primary"
-                              data-apply-edits="{{ c.id }}">
-                        Aplicar edições / Re-renderizar
-                      </button>
-                    </div>
-                  </form>
-                </div>
-
-                <form method="post"
-                      action="{% url 'publish_clip_youtube' c.id %}"
-                      class="publish-form">
-                  {% csrf_token %}
-                  <div>
-                    <label>Canal do YouTube</label>
-                    <select name="youtube_channel"
-                            required
-                            style="width:100%;padding:8px 10px;border-radius:8px;
-                                   border:1px solid var(--border);
-                                   background:#0b1220;color:var(--text);font-size:13px;">
-                      <option value="">Selecione o canal</option>
-                      <option value="canal_principal">Canal Principal</option>
-                      <option value="canal_bbb">Canal BBB</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="title-{{ c.id }}">Título do YouTube</label>
-                    <input id="title-{{ c.id }}"
-                           name="title"
-                           required
-                           placeholder="Ex: O momento mais tenso do vídeo" />
-                  </div>
-                  <div>
-                    <label for="description-{{ c.id }}">Descrição</label>
-                    <textarea id="description-{{ c.id }}"
-                              name="description"
-                              placeholder="Inclua hashtags e CTA para Shorts"></textarea>
-                  </div>
-                  <div>
-                    <label>Agendar publicação (opcional)</label>
-                    <input type="datetime-local"
-                           name="publish_at"
-                           style="width:100%;padding:8px 10px;border-radius:8px;
-                                  border:1px solid var(--border);
-                                  background:#0b1220;color:var(--text);font-size:13px;">
-                  </div>
-                  <button type="submit"
-                          class="publish-button"
-                          {% if not youtube_ready %}disabled{% endif %}>
-                    🚀 Publicar no YouTube
-                  </button>
-                  <div class="publish-status">
-                    {% if youtube_ready %}
-                      YouTube conectado • pronto para enfileirar
-                    {% else %}
-                      YouTube não configurado • defina YOUTUBE_CLIENT_ID/SECRET
-                    {% endif %}
-                  </div>
-                  {% if c.latest_publication %}
-                    <div class="publish-status">
-                      Última tentativa: {{ c.latest_publication.status|capfirst }}
-                      {% if c.latest_publication.external_url %}
-                        • <a href="{{ c.latest_publication.external_url }}" target="_blank">Ver</a>
-                      {% endif %}
-                    </div>
-                  {% endif %}
-                </form>
               </div>
             </div>
           {% endfor %}
         </div>
-      {% else %}
-        <p style="color:var(--muted)">Nenhum clip ainda.</p>
-      {% endif %}
-    </div>
+      </div>
+    {% endif %}
 
       <script>
         const jobId = {{ job.id }};
         const progressStatus = document.getElementById("progress-status");
         const progressBar = document.getElementById("progress-bar");
-        const progressMeta = document.getElementById("progress-meta");
-        const progressSteps = document.getElementById("progress-steps");
-        const FRAME_STEP = 1 / 30;
-
-        function toFixedTime(value) {
-          if (Number.isNaN(value) || value === null || value === undefined) return "0.00";
-          return value.toFixed(2);
-        }
-
-        function openModal(modal) {
-          if (!modal) return;
-          modal.classList.add("active");
-          modal.setAttribute("aria-hidden", "false");
-          const clipId = modal.id.replace("edit-modal-", "");
-          const video = document.querySelector(`[data-edit-video="${clipId}"]`);
-          const startInput = document.querySelector(`[data-edit-start="${clipId}"]`);
-          if (video) {
-            const startValue = parseFloat(startInput?.value);
-            if (!Number.isNaN(startValue)) {
-              video.currentTime = Math.max(startValue, 0);
-            }
-          }
-        }
-
-        function closeModal(modal) {
-          if (!modal) return;
-          modal.classList.remove("active");
-          modal.setAttribute("aria-hidden", "true");
-        }
-
-        document.querySelectorAll("[data-modal-target]").forEach(button => {
-          button.addEventListener("click", () => {
-            const targetId = button.getAttribute("data-modal-target");
-            openModal(document.getElementById(targetId));
-          });
-        });
-
-        document.querySelectorAll("[data-modal-close]").forEach(button => {
-          button.addEventListener("click", () => {
-            const modal = button.closest(".edit-modal");
-            closeModal(modal);
-          });
-        });
-
-        document.addEventListener("keydown", event => {
-          if (event.key !== "Escape") return;
-          document.querySelectorAll(".edit-modal.active").forEach(modal => closeModal(modal));
-        });
-
-        document.addEventListener("click", event => {
-          const stepBtn = event.target.closest("[data-step]");
-          if (stepBtn) {
-            const clipId = stepBtn.dataset.clipId;
-            const video = document.querySelector(`[data-edit-video="${clipId}"]`);
-            if (!video) return;
-            video.pause();
-            const direction = parseInt(stepBtn.dataset.step, 10) || 0;
-            video.currentTime = Math.max(0, video.currentTime + direction * FRAME_STEP);
-            return;
-          }
-          const setBtn = event.target.closest("[data-set]");
-          if (setBtn) {
-            const clipId = setBtn.dataset.clipId;
-            const video = document.querySelector(`[data-edit-video="${clipId}"]`);
-            if (!video) return;
-            const target = setBtn.dataset.set;
-            const input = document.querySelector(
-              target === "start"
-                ? `[data-edit-start="${clipId}"]`
-                : `[data-edit-end="${clipId}"]`
-            );
-            if (input) {
-              input.value = toFixedTime(video.currentTime);
-            }
-          }
-        });
-
-        document.querySelectorAll("[data-edit-video]").forEach(video => {
-          const clipId = video.getAttribute("data-edit-video");
-          const currentLabel = document.querySelector(`[data-current-time="${clipId}"]`);
-          if (!currentLabel) return;
-          video.addEventListener("timeupdate", () => {
-            currentLabel.textContent = `${toFixedTime(video.currentTime)}s`;
-          });
-          video.addEventListener("loadedmetadata", () => {
-            currentLabel.textContent = `${toFixedTime(video.currentTime)}s`;
-          });
-        });
-
-        document.querySelectorAll("[data-edit-form]").forEach(form => {
-          form.addEventListener("submit", () => {
-            const clipId = form.getAttribute("data-edit-form");
-            const button = document.querySelector(`[data-apply-edits="${clipId}"]`);
-            if (!button) return;
-            button.disabled = true;
-            button.textContent = "Reprocessando...";
-          });
-        });
-
-        const stepLabels = {
-          download: "Download",
-          faces: "Faces",
-          transcription: "Transcrição",
-          render: "Render",
-          finalize: "Finalização",
-        };
-
-        function formatDuration(seconds) {
-          if (seconds === null || seconds === undefined) return "—";
-          const mins = Math.floor(seconds / 60);
-          const secs = Math.floor(seconds % 60);
-          if (mins > 0) return `${mins}m ${secs}s`;
-          return `${secs}s`;
-        }
+        const progressPercent = document.getElementById("progress-percent");
 
         async function fetchProgress() {
           try {
             const resp = await fetch(`/jobs/${jobId}/progress/`);
             const data = await resp.json();
-            progressStatus.textContent = `Atualizado • ${data.progress_percent}%`;
-            progressBar.style.width = `${data.progress_percent}%`;
-            progressMeta.innerHTML = `
-              <div><strong>Atual:</strong> ${data.current_step || "—"}</div>
-              <div><strong>Próximo:</strong> ${data.next_step || "—"}</div>
-              <div><strong>Tempo:</strong> ${formatDuration(data.elapsed_seconds)}</div>
-              <div><strong>ETA:</strong> ${formatDuration(data.estimated_remaining_seconds)}</div>
-            `;
-            progressSteps.innerHTML = "";
-            data.steps.forEach(step => {
-              const el = document.createElement("div");
-              const statusClass = step.status || "pending";
-              el.className = `step ${statusClass}`;
-              el.innerHTML = `
-                <span class="step-name">${stepLabels[step.name] || step.name}</span>
-                <span class="step-time">${formatDuration(step.duration)}</span>
-              `;
-              progressSteps.appendChild(el);
-            });
+            const percent = Number.isFinite(data.progress_percent)
+              ? data.progress_percent
+              : 0;
+            progressStatus.textContent = `Atualizado - ${percent}%`;
+            progressBar.style.width = `${percent}%`;
+            if (progressPercent) {
+              progressPercent.textContent = `${percent}%`;
+            }
           } catch (err) {
             progressStatus.textContent = "Falha ao carregar progresso";
           }

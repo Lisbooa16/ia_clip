@@ -14,7 +14,7 @@ import pysubs2
 from faster_whisper import WhisperModel
 from yt_dlp import DownloadError
 
-from analysis.services.viral_analysis import _extract_keywords
+from analysis.services.viral_analysis import _extract_keywords, _classify_story, _infer_emotions
 from subtitles.subtitle_builder import build_subtitle_filter
 from clips.viral_engine.expansion import expand_window
 from clips.viral_engine.profiles import get_profile
@@ -37,18 +37,82 @@ WHISPER_MODEL = None
 def get_whisper_model():
     global WHISPER_MODEL
     if WHISPER_MODEL is None:
-        WHISPER_MODEL = WhisperModel(
-            "small",
-            device="cuda",
-            compute_type="float16",
-            cpu_threads=4,
-            num_workers=1,
-        )
+        device = os.getenv("WHISPER_DEVICE", "cuda")
+        compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
+        try:
+            WHISPER_MODEL = WhisperModel(
+                "small",
+                device=device,
+                compute_type=compute_type,
+                cpu_threads=4,
+                num_workers=1,
+            )
+        except Exception as e:
+            # Fall back to CPU when CUDA libraries are unavailable.
+            print("Whisper GPU init failed, falling back to CPU:", e)
+            WHISPER_MODEL = WhisperModel(
+                "small",
+                device="cpu",
+                compute_type="int8",
+                cpu_threads=4,
+                num_workers=1,
+            )
     return WHISPER_MODEL
 
 FFMPEG_BIN = r"C:\Users\Pichau\OneDrive\Área de Trabalho\ffmpeg\bin\ffmpeg.exe"
 
+def build_words_timeline(transcript, clip_start, clip_end, max_gap=0.5):
+    words = []
 
+    # coleta palavras reais
+    for s in transcript["segments"]:
+        for w in s.get("words", []):
+            if w["end"] <= clip_start:
+                continue
+            if w["start"] >= clip_end:
+                continue
+
+            words.append({
+                "start": max(0.0, w["start"] - clip_start),
+                "end": min(clip_end, w["end"]) - clip_start,
+                "word": w["word"] or "…",
+            })
+
+    if not words:
+        # fallback total (vídeo nunca fica sem legenda)
+        return [{
+            "start": 0.0,
+            "end": clip_end - clip_start,
+            "word": "…",
+        }]
+
+    # ordena
+    words.sort(key=lambda w: w["start"])
+
+    # preenche gaps
+    filled = []
+    last_end = 0.0
+
+    for w in words:
+        if w["start"] - last_end > max_gap:
+            filled.append({
+                "start": last_end,
+                "end": w["start"],
+                "word": "…",
+            })
+        filled.append(w)
+        last_end = w["end"]
+
+    # cobre final
+    total_dur = clip_end - clip_start
+    if total_dur - last_end > max_gap:
+        filled.append({
+            "start": last_end,
+            "end": total_dur,
+            "word": "…",
+        })
+
+    return filled
 
 def detect_source(url: str) -> str:
     u = url.lower()
@@ -689,6 +753,7 @@ def make_vertical_clip_with_focus(
         fallback_cmd[fallback_cmd.index("-crf") + 1] = "23"
         print("[RENDER] ⚠️ fallback render retry")
         subprocess.check_call(fallback_cmd)
+
 
 
 def build_static_background_video(

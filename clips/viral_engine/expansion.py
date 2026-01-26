@@ -1,4 +1,4 @@
-def expand_window(segments, anchor_idx, min_s=8, max_s=20):
+def expand_window(segments, anchor_idx, min_s=8, max_s=20, force_start=None):
     """
     Expande a janela ao redor da âncora (momento viral).
     Retorna um dict com start, end, anchor_start, anchor_end, score, hooks, caption.
@@ -28,7 +28,7 @@ def expand_window(segments, anchor_idx, min_s=8, max_s=20):
 
     # Tentar expandir mais até max_s se melhorar o score
     best_right = right
-    best_score = sum(s["score"] for s in segments[left:right + 1])
+    best_score = sum(s.get("score", 0) for s in segments[left:right + 1])
 
     while right < len(segments) - 1:
         window_dur = segments[right + 1]["end"] - segments[left]["start"]
@@ -36,7 +36,7 @@ def expand_window(segments, anchor_idx, min_s=8, max_s=20):
             break
 
         right += 1
-        current_score = sum(s["score"] for s in segments[left:right + 1])
+        current_score = sum(s.get("score", 0) for s in segments[left:right + 1])
         if current_score > best_score:
             best_score = current_score
             best_right = right

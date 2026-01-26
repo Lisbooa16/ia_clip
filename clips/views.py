@@ -1,16 +1,30 @@
+import re
+
 from django.conf import settings
 from django.contrib import messages
 from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST
 
-from .models import ClipPublication, StoryClipPublication, VideoJob, VideoClip, get_job_progress
+from .models import (
+    ClipPublication,
+    StoryClipPublication,
+    VideoJob,
+    VideoClip,
+    ViralCandidate,
+    get_job_progress,
+)
 from .tasks import process_video_job, publish_clip_to_youtube, process_story_job, publish_story_clip_to_youtube
 from .tasks_clips import render_clip_edit
 
 from django.utils.dateparse import parse_datetime
 from django.utils.timezone import make_aware, get_current_timezone
 from datetime import timezone
+
+from .text_story import split_story_text
+from .services.analysis import load_transcript_for_job, split_transcript_into_candidates, score_candidate
+from .services.copywriter import generate_youtube_description, generate_viral_caption
+
 
 def _parse_float(value):
     try:
@@ -23,6 +37,7 @@ def _render_clip_from_edit(clip: VideoClip) -> None:
 
 def home(request):
     if request.method == "POST":
+        # Video ingestion entrypoint: only enqueue process_video_job here.
         job_type = request.POST.get("job_type", "video")
         url = request.POST.get("url", "").strip()
         language = request.POST.get("language", "auto")
@@ -64,7 +79,7 @@ def home(request):
             args=[job.id],
             queue="clips_cpu"
         )
-        return redirect("job_detail", job_id=job.id)
+        return redirect("analysis_view", job_id=job.id)
 
     jobs = VideoJob.objects.order_by("-created_at")[:20]
     return render(request, "clips/home.html", {"jobs": jobs})
@@ -74,43 +89,32 @@ def text_story_create(request):
     if request.method == "POST":
         story_text = request.POST.get("story_text", "").strip()
         story_title = request.POST.get("story_title", "").strip()
-        max_duration_raw = request.POST.get("max_duration", "").strip()
-        max_duration = 55.0
-        if max_duration_raw:
-            try:
-                max_duration = float(max_duration_raw)
-            except ValueError:
-                max_duration = 55.0
-        max_duration = max(30.0, min(max_duration, 90.0))
 
         if not story_text:
             messages.error(request, "Informe o texto da história.")
             return redirect("text_story_create")
 
-        parts = split_story_text(story_text, max_duration_s=max_duration)
+        parts = split_story_text(story_text)
         if not parts:
             messages.error(request, "Texto inválido para dividir em partes.")
             return redirect("text_story_create")
 
-        jobs = []
-        base_title = story_title or "Text Story"
-        for part in parts:
-            job = VideoJob.objects.create(
-                url="https://text.story.local/",
-                language="pt",
-                processing_mode="clips",
-                status="pending",
-                title=f"{base_title} PT{part.index}",
-                source="text_story",
-            )
-            process_text_story_job.apply_async(
-                args=[job.id, part.text],
-                queue="clips_cpu",
-            )
-            jobs.append(job)
-
-        messages.success(request, f"{len(jobs)} partes enfileiradas para render.")
-        return redirect("job_detail", job_id=jobs[0].id)
+        job = VideoJob.objects.create(
+            url="",
+            language="pt",
+            processing_mode="clips",
+            status="pending",
+            job_type="story",
+            title=story_title,
+            story_text=story_text,
+            source="text_story",
+        )
+        process_story_job.apply_async(
+            args=[job.id],
+            queue="clips_cpu",
+        )
+        messages.success(request, "Job de hist¢ria enfileirado para render.")
+        return redirect("job_detail", job_id=job.id)
 
     return render(request, "clips/text_story_create.html")
 
@@ -142,10 +146,16 @@ def job_detail(request, job_id):
     youtube_ready = True
     for clip in job.clips.all():
         clip.latest_publication = clip.publications.order_by("-created_at").first()
+        try:
+            clip.duration_seconds = max(0.0, clip.effective_end() - clip.effective_start())
+        except Exception:
+            clip.duration_seconds = None
     story_clips = []
     total_story_duration = None
     if job.job_type == "story":
         story_clips = list(job.story_clips.order_by("part_number"))
+        for clip in story_clips:
+            clip.latest_publication = clip.publications.order_by("-created_at").first()
         durations = [c.duration_seconds or 0 for c in story_clips]
         total_story_duration = sum(durations) if durations else None
     full_video_clip = None
@@ -348,3 +358,55 @@ def publish_story_job(request, job_id):
 
     messages.success(request, "Publicações enfileiradas para a história.")
     return redirect("job_detail", job_id=job.id)
+
+
+def analysis_view(request, job_id):
+    job = get_object_or_404(VideoJob, id=job_id)
+    candidates = list(
+        ViralCandidate.objects.filter(video_job=job).order_by("start_time")
+    )
+    transcript_ready = bool(load_transcript_for_job(job))
+    return render(
+        request,
+        "clips/analysis.html",
+        {
+            "job": job,
+            "candidates": candidates,
+            "transcript_ready": transcript_ready,
+        },
+    )
+
+
+@require_POST
+def run_viral_analysis(request, job_id):
+    job = get_object_or_404(VideoJob, id=job_id)
+    if job.job_type != "video":
+        messages.error(request, "Análise viral disponível apenas para vídeos.")
+        return redirect("analysis_view", job_id=job.id)
+    transcript = load_transcript_for_job(job)
+    if not transcript:
+        messages.error(request, "Transcript indisponível para análise.")
+        return redirect("analysis_view", job_id=job.id)
+
+    ViralCandidate.objects.filter(video_job=job).delete()
+    candidates = split_transcript_into_candidates(transcript)
+    created = 0
+    for candidate in candidates:
+        score, emotion, reason = score_candidate(candidate["text"], candidate["duration"])
+        ViralCandidate.objects.create(
+            video_job=job,
+            start_time=round(candidate["start"], 3),
+            end_time=round(candidate["end"], 3),
+            duration=round(candidate["duration"], 3),
+            transcript_text=candidate["text"],
+            viral_score=score,
+            emotion=emotion,
+            reason=reason,
+        )
+        created += 1
+
+    if created:
+        messages.success(request, f"Análise gerou {created} candidatos.")
+    else:
+        messages.error(request, "Nenhum candidato encontrado com as regras atuais.")
+    return redirect("analysis_view", job_id=job.id)

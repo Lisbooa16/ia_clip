@@ -55,6 +55,52 @@ class VideoJob(models.Model):
     video_profile = models.CharField(max_length=50, default="podcast")
 
 
+class ViralCandidate(models.Model):
+    EMOTION = [
+        ("curiosity", "Curiosity"),
+        ("shock", "Shock"),
+        ("opinion", "Opinion"),
+        ("neutral", "Neutral"),
+    ]
+
+    video_job = models.ForeignKey(
+        VideoJob,
+        on_delete=models.CASCADE,
+        related_name="viral_candidates",
+    )
+    start_time = models.FloatField()
+    end_time = models.FloatField()
+    duration = models.FloatField()
+    transcript_text = models.TextField()
+    viral_score = models.IntegerField()
+    emotion = models.CharField(max_length=16, choices=EMOTION, default="neutral")
+    reason = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class KeywordSignal(models.Model):
+    CATEGORY = [
+        ("entity", "Entity"),
+        ("emotion", "Emotion"),
+        ("opinion", "Opinion"),
+        ("curiosity", "Curiosity"),
+        ("shock", "Shock"),
+    ]
+
+    category = models.CharField(max_length=32, choices=CATEGORY)
+    term = models.CharField(max_length=120)
+    language = models.CharField(max_length=10, default="pt")
+    weight = models.IntegerField(default=1)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return str(self.term)
+
+    class Meta:
+        unique_together = ("category", "term", "language")
+
+
 class VideoJobStep(models.Model):
     STATUS = [
         ("pending", "Pending"),
@@ -245,6 +291,14 @@ class VideoClip(models.Model):
     ]
 
     job = models.ForeignKey(VideoJob, on_delete=models.CASCADE, related_name="clips")
+    viral_candidate = models.ForeignKey(
+        ViralCandidate,
+        on_delete=models.SET_NULL,
+        related_name="clips",
+        null=True,
+        blank=True,
+    )
+    editorial_selected = models.BooleanField(default=False)
 
     start = models.FloatField()
     end = models.FloatField()
@@ -264,7 +318,10 @@ class VideoClip(models.Model):
     caption_config = models.JSONField(null=True, blank=True)
 
     caption = models.TextField(blank=True)
+    description = models.TextField(blank=True)
+    viral_caption = models.TextField(blank=True)
     output_path = models.CharField(max_length=500)  # caminho local do clip final
+    thumbnail_path = models.CharField(max_length=500, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -298,6 +355,7 @@ class StoryClip(models.Model):
     part_number = models.IntegerField()
     text = models.TextField()
     video_path = models.CharField(max_length=500, blank=True)
+    audio_path = models.CharField(max_length=500, blank=True)
     duration_seconds = models.FloatField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS, default="pending")
     error = models.TextField(blank=True)
